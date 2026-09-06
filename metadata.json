@@ -1,0 +1,6 @@
+{
+  "name": "BillFlow: Payment & Cash Flow Strategizer",
+  "description": "Strategize bill payments across credit cards and e-wallet pay later accounts, calculate cost-effective grace period sequences, track installments, and avoid late fees.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
