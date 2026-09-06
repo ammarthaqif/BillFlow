@@ -10,6 +10,7 @@ import {
   Clock
 } from 'lucide-react';
 import { BillAccount, InstallmentPlan, UserSettings } from '../types';
+import { formatCurrency } from '../utils/currency';
 
 interface ExecutiveOverviewProps {
   accounts: BillAccount[];
@@ -22,6 +23,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
   installments,
   settings,
 }) => {
+  const currency = settings.currency || 'MYR';
   const totalBalance = accounts.reduce((sum, a) => sum + a.totalBalance, 0);
   const totalStatementDue = accounts.reduce((sum, a) => sum + a.statementBalance, 0);
   const totalCreditLimit = accounts.reduce((sum, a) => sum + a.creditLimit, 0);
@@ -64,7 +66,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             <div>
               <div className="text-slate-400 font-medium">Income Paycheck Schedule</div>
               <div className="font-semibold text-slate-200">
-                Days {settings.paycheckDates.join(' & ')} of Month (${settings.monthlyIncome.toLocaleString()}/mo)
+                Days {settings.paycheckDates.join(' & ')} of Month ({formatCurrency(settings.monthlyIncome, currency)}/mo)
               </div>
             </div>
           </div>
@@ -82,7 +84,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             </div>
           </div>
           <div className="text-2xl font-bold text-white tracking-tight">
-            ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatCurrency(totalBalance, currency)}
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
             <span>{accounts.length} linked accounts</span>
@@ -101,7 +103,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             </div>
           </div>
           <div className="text-2xl font-bold text-amber-400 tracking-tight">
-            ${totalStatementDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatCurrency(totalStatementDue, currency)}
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
             <span>Due across next 30 days</span>
@@ -118,7 +120,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             </div>
           </div>
           <div className="text-2xl font-bold text-purple-400 tracking-tight">
-            ${totalMonthlyInstallments.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatCurrency(totalMonthlyInstallments, currency)}
             <span className="text-xs font-normal text-slate-400 ml-1">/mo</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
@@ -136,7 +138,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             </div>
           </div>
           <div className="text-2xl font-bold text-emerald-400 tracking-tight">
-            ${totalLateFeesGuarded.toFixed(0)} Saved
+            {formatCurrency(totalLateFeesGuarded, currency)} Saved
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
             <span>Avg {avgFloatDays} days free float</span>
@@ -153,7 +155,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             {utilizationRatio.toFixed(1)}%
           </span>
           <span className="text-slate-500">
-            (${totalBalance.toFixed(0)} of ${totalCreditLimit.toLocaleString()} limit)
+            ({formatCurrency(totalBalance, currency)} of {formatCurrency(totalCreditLimit, currency)} limit)
           </span>
         </div>
 

@@ -12,6 +12,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { BillAccount, AccountType } from '../types';
+import { CurrencyCode, getCurrencyConfig } from '../utils/currency';
 
 interface BankSyncModalProps {
   isOpen: boolean;
@@ -20,6 +21,7 @@ interface BankSyncModalProps {
   onAddAccount: (acc: Omit<BillAccount, 'id' | 'apiSynced' | 'lastSyncedAt' | 'status' | 'accountNumberMask'>) => void;
   onSyncBank: (provider: string) => void;
   isSyncing: boolean;
+  currency?: CurrencyCode;
 }
 
 export const BankSyncModal: React.FC<BankSyncModalProps> = ({
@@ -29,9 +31,11 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
   onAddAccount,
   onSyncBank,
   isSyncing,
+  currency = 'MYR',
 }) => {
   const [activeTab, setActiveTab] = useState<'providers' | 'manual'>('providers');
   const [connectingProvider, setConnectingProvider] = useState<string | null>(null);
+  const currencyConfig = getCurrencyConfig(currency);
 
   // Manual Form State
   const [name, setName] = useState('');
@@ -256,7 +260,9 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Total Balance ($)</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Total Balance ({currencyConfig.symbol})
+                </label>
                 <input
                   type="number"
                   required
@@ -269,7 +275,9 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Statement Due ($)</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Statement Due ({currencyConfig.symbol})
+                </label>
                 <input
                   type="number"
                   required
@@ -296,7 +304,9 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Late Fee ($)</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Late Fee ({currencyConfig.symbol})
+                </label>
                 <input
                   type="number"
                   required
@@ -346,7 +356,9 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Minimum Payment ($)</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Minimum Payment ({currencyConfig.symbol})
+                </label>
                 <input
                   type="number"
                   min="0"

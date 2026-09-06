@@ -41,3 +41,20 @@
      fi
      ```
   4. Ensure `.gitignore` explicitly retains lockfiles.
+
+### 6. Live Web App URL Generation Protocol (GitHub Pages / Deployments)
+- **Issue Diagnosis:** GitHub Actions runs build and tests successfully, but does not deploy or output a public web app URL if deployment steps and environment declarations are omitted.
+- **Rectification Standard:**
+  1. **Configure Relative Base in Vite:** In `vite.config.ts`, set `base: './'` so assets resolve correctly in any subpath (e.g., `https://<owner>.github.io/<repo>/`).
+  2. **Grant Deployment Permissions:** Workflows must include:
+     ```yaml
+     permissions:
+       contents: read
+       pages: write
+       id-token: write
+     ```
+  3. **Deploy Artifacts to Pages:** Use `actions/configure-pages@v5`, `actions/upload-pages-artifact@v3` (targeting `./dist`), and `actions/deploy-pages@v4`.
+  4. **Register Deployment Environment:** Declare `environment: { name: 'github-pages', url: ${{ steps.deployment.outputs.page_url }} }` to register the live URL with GitHub and surface it on repository deployment dashboards.
+  5. **Display in Action Summary:** Pipe the output URL directly into `$GITHUB_STEP_SUMMARY` for direct clickability.
+  6. **Static Fallback Resilience:** Ensure client code has fallback default states so static web hosting functions smoothly even when a custom server is absent.
+  7. **Repository Settings Requirement:** Ensure GitHub repository **Settings > Pages > Build and deployment > Source** is configured to **"GitHub Actions"**.

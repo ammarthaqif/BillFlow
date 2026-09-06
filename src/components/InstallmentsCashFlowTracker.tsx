@@ -12,6 +12,7 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { BillAccount, InstallmentPlan, MonthlyCashFlowProjection } from '../types';
+import { CurrencyCode, formatCurrency, getCurrencyConfig } from '../utils/currency';
 
 interface InstallmentsCashFlowTrackerProps {
   accounts: BillAccount[];
@@ -19,6 +20,7 @@ interface InstallmentsCashFlowTrackerProps {
   projections: MonthlyCashFlowProjection[];
   onAddInstallment: (plan: Omit<InstallmentPlan, 'id'>) => void;
   onDeleteInstallment: (id: string) => void;
+  currency?: CurrencyCode;
 }
 
 export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerProps> = ({
@@ -27,8 +29,10 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
   projections,
   onAddInstallment,
   onDeleteInstallment,
+  currency = 'MYR',
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
+  const currencyConfig = getCurrencyConfig(currency);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   // Form State
@@ -160,12 +164,12 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                     <span className="font-semibold text-slate-200">{proj.monthLabel}</span>
                     <div className="flex items-center gap-2">
                       <span className="text-purple-300 font-medium">
-                        ${proj.installmentCommitment.toFixed(0)} BNPL
+                        {formatCurrency(proj.installmentCommitment, currency)} BNPL
                       </span>
                       <span className="text-slate-500">|</span>
-                      <span className="text-slate-400">Total Due: ${totalCommitted.toFixed(0)}</span>
+                      <span className="text-slate-400">Total Due: {formatCurrency(totalCommitted, currency)}</span>
                       <span className="text-emerald-400 font-medium text-[11px] hidden sm:inline">
-                        (Remaining: ${proj.discretionaryRemaining.toFixed(0)})
+                        (Remaining: {formatCurrency(proj.discretionaryRemaining, currency)})
                       </span>
                     </div>
                   </div>
@@ -176,13 +180,13 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                     <div
                       className="bg-purple-500 rounded-l-md h-full transition-all duration-500 relative group"
                       style={{ width: `${installmentWidth}%` }}
-                      title={`Installments: $${proj.installmentCommitment.toFixed(2)}`}
+                      title={`Installments: ${formatCurrency(proj.installmentCommitment, currency)}`}
                     />
                     {/* Revolving Bills Segment */}
                     <div
                       className="bg-indigo-500/70 h-full transition-all duration-500"
                       style={{ width: `${revolvingWidth}%` }}
-                      title={`Revolving Bills: $${proj.revolvingBillsDue.toFixed(2)}`}
+                      title={`Revolving Bills: ${formatCurrency(proj.revolvingBillsDue, currency)}`}
                     />
                   </div>
                 </div>
@@ -246,7 +250,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
 
                     <div className="text-right">
                       <div className="text-sm font-bold text-purple-400">
-                        ${inst.monthlyAmount.toFixed(2)}
+                        {formatCurrency(inst.monthlyAmount, currency)}
                         <span className="text-[10px] text-slate-400 font-normal">/mo</span>
                       </div>
                       <div className="text-[10px] text-emerald-400 font-medium">
@@ -359,7 +363,9 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Total Cost ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Total Cost ({currencyConfig.symbol})
+                  </label>
                   <input
                     type="number"
                     min="1"
@@ -405,7 +411,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
               {/* Calculated Monthly */}
               <div className="bg-purple-950/30 p-3 rounded-lg border border-purple-800/30 flex items-center justify-between text-xs">
                 <span className="text-purple-300 font-medium">Calculated Monthly Impact:</span>
-                <span className="text-sm font-bold text-white">${monthlyAmount.toFixed(2)}/mo</span>
+                <span className="text-sm font-bold text-white">{formatCurrency(monthlyAmount, currency)}/mo</span>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

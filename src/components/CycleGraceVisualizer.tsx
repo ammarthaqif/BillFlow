@@ -11,12 +11,17 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { BillAccount } from '../types';
+import { CurrencyCode, formatCurrency } from '../utils/currency';
 
 interface CycleGraceVisualizerProps {
   accounts: BillAccount[];
+  currency?: CurrencyCode;
 }
 
-export const CycleGraceVisualizer: React.FC<CycleGraceVisualizerProps> = ({ accounts }) => {
+export const CycleGraceVisualizer: React.FC<CycleGraceVisualizerProps> = ({ 
+  accounts,
+  currency = 'MYR' 
+}) => {
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
@@ -109,7 +114,7 @@ export const CycleGraceVisualizer: React.FC<CycleGraceVisualizerProps> = ({ acco
               <div className="text-left sm:text-right">
                 <div className="text-xs text-slate-400">Late Penalty Fee</div>
                 <div className="text-sm font-bold text-rose-400">
-                  ${selectedAccount.lateFee} + {selectedAccount.apr}% APR
+                  {formatCurrency(selectedAccount.lateFee, currency)} + {selectedAccount.apr}% APR
                 </div>
               </div>
             </div>
@@ -167,7 +172,7 @@ export const CycleGraceVisualizer: React.FC<CycleGraceVisualizerProps> = ({ acco
 
               <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
                 <span className="text-slate-400 block text-[11px]">Minimum Due</span>
-                <strong className="text-amber-400 text-sm">${selectedAccount.minPayment.toFixed(2)}</strong>
+                <strong className="text-amber-400 text-sm">{formatCurrency(selectedAccount.minPayment, currency)}</strong>
                 <span className="text-[10px] text-slate-500 block mt-0.5">Avoids late fee</span>
               </div>
 

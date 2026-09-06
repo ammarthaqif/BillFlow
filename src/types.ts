@@ -1,3 +1,5 @@
+import { CurrencyCode } from './utils/currency';
+
 export type AccountType = 'credit_card' | 'ewallet_pay_later' | 'bank_account';
 
 export type PaymentStrategyType = 'grace_float' | 'avalanche' | 'snowball' | 'cashflow_buffer';
@@ -21,6 +23,8 @@ export interface BillAccount {
   lastSyncedAt: string;
   status: 'active' | 'synced' | 'warning';
   accountNumberMask: string;
+  ownerName?: string;
+  ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
 }
 
 export interface InstallmentPlan {
@@ -37,6 +41,8 @@ export interface InstallmentPlan {
   startDate: string;
   nextBillingDate: string;
   notes?: string;
+  ownerName?: string;
+  ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
 }
 
 export interface PaymentScheduleItem {
@@ -63,6 +69,7 @@ export interface PaymentScheduleItem {
 }
 
 export interface UserSettings {
+  currency: CurrencyCode;
   monthlyIncome: number;
   paycheckSchedule: 'monthly' | 'bi_monthly' | 'weekly';
   paycheckDates: number[]; // e.g. [1, 15] or [28]
@@ -110,3 +117,55 @@ export interface AIAdvisorResponse {
   savingsEstimated: string;
   riskAlerts: string[];
 }
+
+export type FamilyRole = 'husband' | 'wife' | 'partner' | 'parent' | 'member';
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  familyRole: FamilyRole;
+  householdName: string;
+  createdAt: string;
+  databaseId: string;
+}
+
+export interface UserDedicatedDatabase {
+  databaseId: string;
+  userId: string;
+  userEmail: string;
+  lastUpdated: string;
+  version: number;
+  accounts: BillAccount[];
+  installments: InstallmentPlan[];
+  settings: UserSettings;
+  paidScheduleIds: string[];
+  scheduledScheduleIds: string[];
+  alertThresholds: number[];
+}
+
+export interface FamilySyncPackage {
+  format: 'billflow-family-sync';
+  version: number;
+  exportedAt: string;
+  checksum: string;
+  exportedBy: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    familyRole: FamilyRole;
+    householdName: string;
+  };
+  data: {
+    accounts: BillAccount[];
+    installments: InstallmentPlan[];
+    settings?: Partial<UserSettings>;
+  };
+  summary: {
+    totalAccounts: number;
+    totalInstallments: number;
+    totalDebt: number;
+    totalMonthlyInstallments: number;
+  };
+}
+

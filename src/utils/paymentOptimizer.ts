@@ -1,4 +1,5 @@
 import { BillAccount, InstallmentPlan, MonthlyCashFlowProjection, PaymentScheduleItem, PaymentStrategyType, CustomAlert } from '../types';
+import { CurrencyCode, formatCurrency } from './currency';
 
 export function getDaysDifference(targetDateStr: string, fromDateStr = '2026-10-01'): number {
   const target = new Date(targetDateStr);
@@ -154,7 +155,11 @@ export function calculatePaymentSchedule(
 /**
  * Generates dynamic alerts based on upcoming cycle deadlines, high utilization, and installments.
  */
-export function generateAlerts(accounts: BillAccount[], installments: InstallmentPlan[]): CustomAlert[] {
+export function generateAlerts(
+  accounts: BillAccount[], 
+  installments: InstallmentPlan[], 
+  currency: CurrencyCode = 'MYR'
+): CustomAlert[] {
   const alerts: CustomAlert[] = [];
 
   accounts.forEach((acc) => {
@@ -168,7 +173,7 @@ export function generateAlerts(accounts: BillAccount[], installments: Installmen
         accountName: acc.name,
         type: 'due_soon',
         title: `Payment Due in ${days} Day${days === 1 ? '' : 's'}!`,
-        message: `${acc.name} due date is ${formatDate(acc.dueDate)}. Pay at least $${acc.minPayment.toFixed(2)} to avoid a $${acc.lateFee} late fee.`,
+        message: `${acc.name} due date is ${formatDate(acc.dueDate)}. Pay at least ${formatCurrency(acc.minPayment, currency)} to avoid a ${formatCurrency(acc.lateFee, currency)} late fee.`,
         dueDate: acc.dueDate,
         daysRemaining: days,
         severity: 'urgent',
@@ -182,7 +187,7 @@ export function generateAlerts(accounts: BillAccount[], installments: Installmen
         accountName: acc.name,
         type: 'grace_expiring',
         title: `Grace Period Ending: ${acc.name}`,
-        message: `Statement balance of $${acc.statementBalance.toFixed(2)} is due in ${days} days. Clear before grace period expires to pay 0% interest.`,
+        message: `Statement balance of ${formatCurrency(acc.statementBalance, currency)} is due in ${days} days. Clear before grace period expires to pay 0% interest.`,
         dueDate: acc.dueDate,
         daysRemaining: days,
         severity: 'warning',
@@ -198,7 +203,7 @@ export function generateAlerts(accounts: BillAccount[], installments: Installmen
         accountName: acc.name,
         type: 'high_utilization',
         title: `High Utilization Alert (${utilization}%)`,
-        message: `${acc.name} balance ($${acc.totalBalance}) is at ${utilization}% of limit ($${acc.creditLimit}). Paying down lowers credit score impact.`,
+        message: `${acc.name} balance (${formatCurrency(acc.totalBalance, currency)}) is at ${utilization}% of limit (${formatCurrency(acc.creditLimit, currency)}). Paying down lowers credit score impact.`,
         dueDate: acc.dueDate,
         daysRemaining: days,
         severity: 'warning',
@@ -216,7 +221,7 @@ export function generateAlerts(accounts: BillAccount[], installments: Installmen
         accountName: inst.accountName,
         type: 'installment_finishing',
         title: `Final Installment: ${inst.title}`,
-        message: `Your final payment of $${inst.monthlyAmount.toFixed(2)} for ${inst.title} is due this month. Once paid, you free up $${inst.monthlyAmount.toFixed(2)} monthly cash flow!`,
+        message: `Your final payment of ${formatCurrency(inst.monthlyAmount, currency)} for ${inst.title} is due this month. Once paid, you free up ${formatCurrency(inst.monthlyAmount, currency)} monthly cash flow!`,
         dueDate: inst.nextBillingDate,
         daysRemaining: getDaysDifference(inst.nextBillingDate),
         severity: 'info',

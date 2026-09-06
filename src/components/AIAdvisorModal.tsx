@@ -12,6 +12,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { AIAdvisorResponse, BillAccount, PaymentStrategyType } from '../types';
+import { CurrencyCode, formatCurrency } from '../utils/currency';
 
 interface AIAdvisorModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ interface AIAdvisorModalProps {
   accounts: BillAccount[];
   strategy: PaymentStrategyType;
   liquidCash: number;
+  currency?: CurrencyCode;
 }
 
 export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
@@ -27,6 +29,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
   accounts,
   strategy,
   liquidCash,
+  currency = 'MYR',
 }) => {
   const [loading, setLoading] = useState(false);
   const [advisorData, setAdvisorData] = useState<AIAdvisorResponse | null>(null);
@@ -37,7 +40,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
   const quickPrompts = [
     'How do I maximize cash float until my 15th paycheck?',
     'Should I prioritize SPayLater or Amex Gold first?',
-    'What is the minimum cash required to guarantee $0 in late fees?',
+    'What is the minimum cash required to guarantee 0 in late fees?',
     'Analyze my multi-month installment burden and suggest fixes',
   ];
 
@@ -50,6 +53,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
         body: JSON.stringify({
           strategy,
           liquidCash,
+          currency,
           userQuestion: question || customQuestion,
         }),
       });
@@ -161,7 +165,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
                         </div>
 
                         <div className="text-right pl-7 sm:pl-0">
-                          <div className="text-sm font-bold text-white">${step.amount}</div>
+                          <div className="text-sm font-bold text-white">{formatCurrency(step.amount, currency)}</div>
                           <span className="text-[10px] text-emerald-400 font-medium capitalize">
                             {step.paymentType.replace('_', ' ')}
                           </span>

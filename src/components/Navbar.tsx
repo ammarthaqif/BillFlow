@@ -1,36 +1,48 @@
 import React from 'react';
 import { 
-  ShieldCheck, 
-  RefreshCw, 
   Bell, 
   Plus, 
   Sparkles, 
   CreditCard,
-  CheckCircle2
+  Database,
+  ArrowRightLeft,
+  LogOut
 } from 'lucide-react';
-import { CustomAlert } from '../types';
+import { CustomAlert, UserProfile } from '../types';
+import { CurrencyCode } from '../utils/currency';
+import { CurrencySelector } from './CurrencySelector';
 
 interface NavbarProps {
+  currentUser: UserProfile;
   alerts: CustomAlert[];
+  currentCurrency: CurrencyCode;
+  onCurrencyChange: (newCurrency: CurrencyCode) => void;
   onOpenAlerts: () => void;
   onOpenConnectBank: () => void;
   onOpenAIAdvisor: () => void;
+  onOpenFamilySync: () => void;
+  onLogout: () => void;
   onSyncAll: () => void;
   isSyncing: boolean;
   lastSyncedTime: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
+  currentUser,
   alerts,
+  currentCurrency,
+  onCurrencyChange,
   onOpenAlerts,
   onOpenConnectBank,
   onOpenAIAdvisor,
+  onOpenFamilySync,
+  onLogout,
   onSyncAll,
   isSyncing,
-  lastSyncedTime,
 }) => {
   const unreadAlerts = alerts.filter((a) => !a.read);
   const urgentCount = unreadAlerts.filter((a) => a.severity === 'urgent').length;
+  const isHusband = currentUser.familyRole === 'husband';
 
   return (
     <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 text-white">
@@ -38,7 +50,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center justify-between h-16">
           {/* Brand Logo & Name */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-500 to-emerald-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-500 to-emerald-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
               <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
                 <CreditCard className="w-5 h-5 text-indigo-400" />
               </div>
@@ -47,39 +59,39 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight text-white">BillFlow</span>
                 <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  Float & Grace Optimizer
+                  Float Optimizer
                 </span>
               </div>
-              <p className="text-xs text-slate-400 hidden sm:block">
-                Multi-Card & E-Wallet Payment Strategizer
-              </p>
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span className="hidden sm:inline">Household: {currentUser.householdName}</span>
+                <span className="hidden md:inline text-slate-600">•</span>
+                <span className="hidden md:flex items-center gap-1 text-[11px] text-indigo-300 font-mono">
+                  <Database className="w-3 h-3 text-indigo-400" />
+                  <span>{currentUser.databaseId}</span>
+                </span>
+              </div>
             </div>
           </div>
 
           {/* Actions & Status */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* Open Banking Sync Status & Button */}
-            <div className="hidden md:flex items-center gap-2 text-xs bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-slate-300 font-medium">Bank APIs Synced</span>
-              <span className="text-slate-500">|</span>
-              <button
-                id="btn-sync-all"
-                onClick={onSyncAll}
-                disabled={isSyncing}
-                className="flex items-center gap-1.5 text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer transition-colors disabled:opacity-50"
-                title="Sync live balances across all credit cards and e-wallet accounts"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>{isSyncing ? 'Syncing...' : 'Sync Balances'}</span>
-              </button>
-            </div>
+          <div className="flex items-center gap-1.5 sm:gap-2.5">
+            {/* Family Sync Button */}
+            <button
+              id="btn-open-family-sync"
+              onClick={onOpenFamilySync}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-950/80 hover:bg-indigo-900/90 text-indigo-300 border border-indigo-500/40 transition-all cursor-pointer shadow-sm hover:shadow-indigo-500/20"
+              title="Export or import synchronization data for husband/wife & family members"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">Family Sync</span>
+              <span className="sm:hidden">Sync</span>
+            </button>
 
             {/* AI Advisor Button */}
             <button
               id="btn-open-ai-advisor"
               onClick={onOpenAIAdvisor}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-md shadow-indigo-600/25 transition-all cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-md shadow-indigo-600/25 transition-all cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
               <span>AI Strategist</span>
@@ -89,11 +101,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               id="btn-connect-account"
               onClick={onOpenConnectBank}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Connect Account</span>
-              <span className="sm:hidden">Add</span>
+              <span className="hidden md:inline">Connect Account</span>
+              <span className="md:hidden">Add</span>
             </button>
 
             {/* Notification Bell */}
@@ -114,6 +126,44 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               )}
             </button>
+
+            {/* Currency Selector (Default MYR) */}
+            <CurrencySelector
+              currentCurrency={currentCurrency}
+              onCurrencyChange={onCurrencyChange}
+            />
+
+            {/* User Profile Badge & Quick Switch */}
+            <div className="flex items-center gap-2 pl-1 border-l border-slate-800 ml-1">
+              <button
+                onClick={onOpenFamilySync}
+                className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 cursor-pointer transition-colors"
+                title={`Active: ${currentUser.name} (${currentUser.familyRole}). Click to manage family sync & profiles.`}
+              >
+                <div className={`w-7 h-7 rounded-md flex items-center justify-center text-white font-bold text-xs ${
+                  isHusband ? 'bg-blue-600' : 'bg-rose-600'
+                }`}>
+                  {isHusband ? 'H' : 'W'}
+                </div>
+                <div className="text-left hidden lg:block pr-1">
+                  <div className="text-[11px] font-bold text-white leading-tight truncate max-w-[100px]">
+                    {currentUser.name}
+                  </div>
+                  <div className="text-[9px] text-slate-400 capitalize flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span>{currentUser.familyRole}</span>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={onLogout}
+                className="text-slate-500 hover:text-slate-300 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Log out or switch user account"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -17,19 +17,24 @@ import {
 } from 'lucide-react';
 import { BillAccount, PaymentScheduleItem, PaymentStrategyType } from '../types';
 import { formatDate } from '../utils/paymentOptimizer';
+import { CurrencyCode, formatCurrency, getCurrencyConfig } from '../utils/currency';
 
 interface PaymentOptimizerMatrixProps {
   accounts: BillAccount[];
   schedule: PaymentScheduleItem[];
   strategy: PaymentStrategyType;
-  onSelectStrategy: (s: PaymentStrategyType) => void;
+  onSelectStrategy?: (s: PaymentStrategyType) => void;
+  onStrategyChange?: (s: PaymentStrategyType) => void;
   allocatedCash: number;
-  onUpdateAllocatedCash: (amount: number) => void;
-  totalStatementDue: number;
-  totalMinRequired: number;
+  onUpdateAllocatedCash?: (amount: number) => void;
+  onAllocatedCashChange?: (amount: number) => void;
+  totalStatementDue?: number;
+  totalMinRequired?: number;
   onToggleStatus: (scheduleId: string) => void;
   paidScheduleIds: Set<string>;
   scheduledScheduleIds: Set<string>;
+  onOpenAIAdvisor?: () => void;
+  currency?: CurrencyCode;
 }
 
 export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
@@ -37,15 +42,35 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
   schedule,
   strategy,
   onSelectStrategy,
+  onStrategyChange,
   allocatedCash,
   onUpdateAllocatedCash,
+  onAllocatedCashChange,
   totalStatementDue,
   totalMinRequired,
   onToggleStatus,
   paidScheduleIds,
   scheduledScheduleIds,
+  onOpenAIAdvisor,
+  currency = 'MYR',
 }) => {
   const [showExplanation, setShowExplanation] = useState(false);
+  const currencyConfig = getCurrencyConfig(currency);
+
+  const handleStrategyChange = (s: PaymentStrategyType) => {
+    if (onSelectStrategy) onSelectStrategy(s);
+    if (onStrategyChange) onStrategyChange(s);
+  };
+
+  const handleCashChange = (amount: number) => {
+    if (onUpdateAllocatedCash) onUpdateAllocatedCash(amount);
+    if (onAllocatedCashChange) onAllocatedCashChange(amount);
+  };
+
+  const effectiveStatementDue =
+    totalStatementDue ?? accounts.reduce((sum, a) => sum + a.statementBalance, 0);
+  const effectiveMinRequired =
+    totalMinRequired ?? accounts.reduce((sum, a) => sum + a.minPayment, 0);
 
   const strategies = [
     {
@@ -127,7 +152,7 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
           </div>
           <ul className="list-disc pl-5 space-y-1 text-slate-300">
             <li>
-              <strong>Non-Negotiable Minimums First:</strong> All accounts with upcoming deadlines receive their minimum payment requirement ($ {totalMinRequired.toFixed(2)} total) to prevent $25-$40 late fees and negative credit reporting.
+              <strong>Non-Negotiable Minimums First:</strong> All accounts with upcoming deadlines receive their minimum payment requirement ({formatCurrency(effectiveMinRequired, currency)} total) to prevent late fees and negative credit reporting.
             </li>
             <li>
               <strong>Grace Period Float Window:</strong> Credit cards provide 21–30 days of 0% interest float from statement close date. E-wallets (e.g. GrabPay Later) have tighter 7–15 day windows. The engine schedules payments 48 hours prior to the deadline for bank processing safety.
@@ -147,7 +172,7 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
           return (
             <button
               key={strat.id}
-              onClick={() => onSelectStrategy(strat.id)}
+              onClick={() => handleStrategyChange(strat.id)}
               className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
                 isSelected
                   ? 'bg-indigo-600/15 border-indigo-500 ring-1 ring-indigo-500 shadow-md shadow-indigo-500/10'
@@ -198,26 +223,28 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold">
+                {currencyConfig.symbol}
+              </span>
               <input
                 id="cash-input"
                 type="number"
                 min="0"
                 step="50"
                 value={allocatedCash}
-                onChange={(e) => onUpdateAllocatedCash(Math.max(0, Number(e.target.value)))}
-                className="w-36 pl-7 pr-3 py-1.5 text-right font-bold text-white bg-slate-900 rounded-lg border border-slate-700 focus:outline-none focus:border-indigo-500 text-sm"
+                onChange={(e) => handleCashChange(Math.max(0, Number(e.target.value)))}
+                className="w-36 pl-9 pr-3 py-1.5 text-right font-bold text-white bg-slate-900 rounded-lg border border-slate-700 focus:outline-none focus:border-indigo-500 text-sm"
               />
             </div>
             <button
-              onClick={() => onUpdateAllocatedCash(totalStatementDue)}
+              onClick={() => handleCashChange(effectiveStatementDue)}
               className="px-2.5 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors cursor-pointer"
               title="Set cash equal to 100% of all statement balances"
             >
               Full Payoff
             </button>
             <button
-              onClick={() => onUpdateAllocatedCash(totalMinRequired)}
+              onClick={() => handleCashChange(effectiveMinRequired)}
               className="px-2.5 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors cursor-pointer"
               title="Set cash equal to required minimums only"
             >
@@ -230,10 +257,10 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
         <input
           type="range"
           min="0"
-          max={Math.max(totalStatementDue * 1.2, 5000)}
+          max={Math.max(effectiveStatementDue * 1.2, 5000)}
           step="50"
           value={allocatedCash}
-          onChange={(e) => onUpdateAllocatedCash(Number(e.target.value))}
+          onChange={(e) => handleCashChange(Number(e.target.value))}
           className="w-full accent-indigo-500 cursor-pointer h-2 bg-slate-700 rounded-lg"
         />
 
@@ -241,20 +268,20 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1 border-t border-slate-700/50">
           <div className="flex items-center gap-2">
             <span className="text-slate-400">Total Statement Due:</span>
-            <span className="font-bold text-white">${totalStatementDue.toFixed(2)}</span>
+            <span className="font-bold text-white">{formatCurrency(effectiveStatementDue, currency)}</span>
             <span className="text-slate-500">•</span>
             <span className="text-slate-400">Total Min Required:</span>
-            <span className="font-bold text-amber-400">${totalMinRequired.toFixed(2)}</span>
+            <span className="font-bold text-amber-400">{formatCurrency(effectiveMinRequired, currency)}</span>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
               <CheckCircle2 className="w-4 h-4" />
-              <span>${totalLateFeesSaved} Late Fees Avoided</span>
+              <span>{formatCurrency(totalLateFeesSaved, currency)} Late Fees Avoided</span>
             </div>
             <div className="flex items-center gap-1.5 text-indigo-400 font-medium">
               <Zap className="w-4 h-4" />
-              <span>~${totalInterestSaved}/mo Interest Saved</span>
+              <span>~{formatCurrency(totalInterestSaved, currency)}/mo Interest Saved</span>
             </div>
           </div>
         </div>
@@ -332,7 +359,7 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
                           </strong>
                         </span>
                         <span>
-                          Late Penalty: <strong className="text-slate-200">${item.lateFee}</strong>
+                          Late Penalty: <strong className="text-slate-200">{formatCurrency(item.lateFee, currency)}</strong>
                         </span>
                         <span>
                           Float Gained:{' '}
@@ -349,17 +376,17 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
                         Recommended Pay: <strong className="text-indigo-300">{formatDate(item.recommendedPayDate)}</strong>
                       </div>
                       <div className="text-xl font-bold text-white tracking-tight">
-                        ${item.amount.toFixed(2)}
+                        {formatCurrency(item.amount, currency)}
                       </div>
                       <div className="text-[10px] font-medium text-slate-400">
                         {item.paymentType === 'full_statement' ? (
                           <span className="text-emerald-400 font-semibold">Full Statement (0% Interest)</span>
                         ) : item.paymentType === 'minimum_due' ? (
-                          <span className="text-amber-400">Minimum Required ($0 Late Fee)</span>
+                          <span className="text-amber-400">Minimum Required ({formatCurrency(0, currency)} Late Fee)</span>
                         ) : (
-                          <span className="text-indigo-400">Optimized Partial ($ {item.amount.toFixed(2)})</span>
+                          <span className="text-indigo-400">Optimized Partial ({formatCurrency(item.amount, currency)})</span>
                         )}
-                        <span className="text-slate-500 ml-1">/ Total ${item.statementBalance.toFixed(2)}</span>
+                        <span className="text-slate-500 ml-1">/ Total {formatCurrency(item.statementBalance, currency)}</span>
                       </div>
                     </div>
 

@@ -21,6 +21,38 @@ const ai = new GoogleGenAI({
   },
 });
 
+// Dedicated User Databases Partition Map
+interface UserProfileServer {
+  id: string;
+  name: string;
+  email: string;
+  familyRole: string;
+  householdName: string;
+  createdAt: string;
+  databaseId: string;
+}
+
+let registeredUsers: UserProfileServer[] = [
+  {
+    id: 'usr_ammar_01',
+    name: 'Ammar Thaqif',
+    email: 'ammarthaqif.ar@gmail.com',
+    familyRole: 'husband',
+    householdName: 'Thaqif Household',
+    createdAt: '2026-09-01T08:00:00.000Z',
+    databaseId: 'db_ammar_thaqif',
+  },
+  {
+    id: 'usr_sarah_02',
+    name: 'Sarah Thaqif',
+    email: 'sarah.thaqif@gmail.com',
+    familyRole: 'wife',
+    householdName: 'Thaqif Household',
+    createdAt: '2026-09-01T08:00:00.000Z',
+    databaseId: 'db_sarah_thaqif',
+  },
+];
+
 // Seed data with realistic multi-card and ewallet pay later accounts
 let accounts = [
   {
@@ -189,6 +221,7 @@ let installments = [
 ];
 
 let userSettings = {
+  currency: 'MYR',
   monthlyIncome: 6500.0,
   paycheckSchedule: 'bi_monthly', // 1st & 15th
   paycheckDates: [1, 15],
@@ -200,6 +233,168 @@ let userSettings = {
 // API: Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Dedicated User Databases in-memory store
+const userDatabases: Record<string, any> = {
+  usr_ammar_01: {
+    databaseId: 'db_ammar_thaqif',
+    userId: 'usr_ammar_01',
+    userEmail: 'ammarthaqif.ar@gmail.com',
+    lastUpdated: new Date().toISOString(),
+    version: 1,
+    accounts: accounts.slice(0, 3).map((a) => ({
+      ...a,
+      ownerName: 'Ammar (Husband)',
+      ownerRole: 'husband',
+    })),
+    installments: installments.slice(0, 2).map((i) => ({
+      ...i,
+      ownerName: 'Ammar (Husband)',
+      ownerRole: 'husband',
+    })),
+    settings: { ...userSettings, allocatedCashForBills: 3800 },
+    paidScheduleIds: [],
+    scheduledScheduleIds: [],
+    alertThresholds: [7, 3, 1],
+  },
+  usr_sarah_02: {
+    databaseId: 'db_sarah_thaqif',
+    userId: 'usr_sarah_02',
+    userEmail: 'sarah.thaqif@gmail.com',
+    lastUpdated: new Date().toISOString(),
+    version: 1,
+    accounts: accounts.slice(2).map((a) => ({
+      ...a,
+      ownerName: 'Sarah (Wife)',
+      ownerRole: 'wife',
+    })),
+    installments: installments.slice(2).map((i) => ({
+      ...i,
+      ownerName: 'Sarah (Wife)',
+      ownerRole: 'wife',
+    })),
+    settings: { ...userSettings, monthlyIncome: 5500, allocatedCashForBills: 2600 },
+    paidScheduleIds: [],
+    scheduledScheduleIds: [],
+    alertThresholds: [5, 2, 1],
+  },
+};
+
+// API: Get all registered users
+app.get('/api/users', (req, res) => {
+  res.json({ users: registeredUsers });
+});
+
+// API: Register new user & assign dedicated database
+app.post('/api/auth/register', (req, res) => {
+  const { name, email, familyRole, householdName } = req.body;
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required.' });
+  }
+
+  const existing = registeredUsers.find((u) => u.email.toLowerCase() === email.toLowerCase());
+  if (existing) {
+    return res.status(409).json({ error: 'An account with this email already exists.' });
+  }
+
+  const userId = `usr_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+  const cleanName = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const databaseId = `db_${cleanName}_${Date.now().toString(36)}`;
+
+  const newUser: UserProfileServer = {
+    id: userId,
+    name: name.trim(),
+    email: email.trim().toLowerCase(),
+    familyRole: familyRole || 'husband',
+    householdName: householdName?.trim() || 'My Family',
+    createdAt: new Date().toISOString(),
+    databaseId,
+  };
+
+  registeredUsers.push(newUser);
+
+  // Initialize dedicated database
+  const dedicatedDb = {
+    databaseId,
+    userId,
+    userEmail: newUser.email,
+    lastUpdated: new Date().toISOString(),
+    version: 1,
+    accounts: accounts.map((a) => ({
+      ...a,
+      id: `acc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      ownerName: `${newUser.name} (${newUser.familyRole})`,
+      ownerRole: newUser.familyRole,
+    })),
+    installments: installments.map((i) => ({
+      ...i,
+      id: `inst-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      ownerName: `${newUser.name} (${newUser.familyRole})`,
+      ownerRole: newUser.familyRole,
+    })),
+    settings: { ...userSettings },
+    paidScheduleIds: [],
+    scheduledScheduleIds: [],
+    alertThresholds: [7, 3, 1],
+  };
+
+  userDatabases[userId] = dedicatedDb;
+
+  res.status(201).json({ user: newUser, database: dedicatedDb });
+});
+
+// API: Login user & return their dedicated database
+app.post('/api/auth/login', (req, res) => {
+  const { email, userId } = req.body;
+  const user = registeredUsers.find((u) => 
+    (userId && u.id === userId) || (email && u.email.toLowerCase() === email.toLowerCase())
+  );
+
+  if (!user) {
+    return res.status(404).json({ error: 'User not found. Please register first.' });
+  }
+
+  let db = userDatabases[user.id];
+  if (!db) {
+    db = {
+      databaseId: user.databaseId,
+      userId: user.id,
+      userEmail: user.email,
+      lastUpdated: new Date().toISOString(),
+      version: 1,
+      accounts: accounts,
+      installments: installments,
+      settings: { ...userSettings },
+      paidScheduleIds: [],
+      scheduledScheduleIds: [],
+      alertThresholds: [7, 3, 1],
+    };
+    userDatabases[user.id] = db;
+  }
+
+  res.json({ user, database: db });
+});
+
+// API: Get specific user's dedicated database
+app.get('/api/user-db/:userId', (req, res) => {
+  const { userId } = req.params;
+  const db = userDatabases[userId];
+  if (!db) {
+    return res.status(404).json({ error: 'Dedicated database not found for user.' });
+  }
+  res.json(db);
+});
+
+// API: Auto-save / update user's dedicated database
+app.put('/api/user-db/:userId', (req, res) => {
+  const { userId } = req.params;
+  userDatabases[userId] = {
+    ...req.body,
+    userId,
+    lastUpdated: new Date().toISOString(),
+  };
+  res.json({ success: true, databaseId: userDatabases[userId].databaseId });
 });
 
 // API: Get Accounts
@@ -298,6 +493,8 @@ app.post('/api/settings', (req, res) => {
 
 // API: AI Strategic Cash Flow Advisor using Gemini 3.8 Flash
 app.post('/api/gemini/advise', async (req, res) => {
+  const currency = req.body.currency || userSettings.currency || 'MYR';
+  const currSymbol = currency === 'MYR' ? 'RM' : (currency === 'USD' ? '$' : (currency === 'SGD' ? 'S$' : (currency === 'EUR' ? '€' : (currency === 'GBP' ? '£' : (currency === 'IDR' ? 'Rp' : (currency === 'JPY' ? '¥' : '$'))))));
   try {
     const { strategy, liquidCash, userQuestion } = req.body;
 
@@ -310,17 +507,17 @@ app.post('/api/gemini/advise', async (req, res) => {
       totalBalance: a.totalBalance,
       dueDate: a.dueDate,
       apr: `${a.apr}%`,
-      lateFee: `$${a.lateFee}`,
+      lateFee: `${currSymbol} ${a.lateFee}`,
       gracePeriodDays: `${a.gracePeriodDays} days`,
       cycleDay: a.cycleDay,
-      minPayment: `$${a.minPayment}`,
+      minPayment: `${currSymbol} ${a.minPayment}`,
     }));
 
     const installmentsSummary = installments.map((i) => ({
       item: i.title,
       account: i.accountName,
       category: i.category,
-      monthly: `$${i.monthlyAmount}`,
+      monthly: `${currSymbol} ${i.monthlyAmount}`,
       remainingMonths: `${i.remainingTenure} of ${i.totalTenure}`,
       interestRate: `${i.interestRate}%`,
     }));
@@ -331,13 +528,14 @@ app.post('/api/gemini/advise', async (req, res) => {
 
     const prompt = `
 You are an expert Credit Card & E-Wallet Pay Later Cash Flow Strategist and Debt Optimization AI.
-Analyze the user's accounts, statement balances, cycle dates, grace periods, APRs, and monthly installments to formulate an optimal payment strategy.
+Analyze the user's accounts, statement balances, cycle dates, grace periods, APRs, and monthly installments to formulate an optimal payment strategy in currency ${currency} (${currSymbol}).
 
 CURRENT FINANCIAL SNAPSHOT:
-- User's Available Liquid Cash: $${liquidCash || userSettings.allocatedCashForBills}
-- Total Statement Due Across All Accounts: $${totalStatementDue.toFixed(2)}
-- Total Non-Negotiable Minimums Due: $${totalMinDue.toFixed(2)}
-- Committed Monthly Installments: $${totalMonthlyInstallments.toFixed(2)}
+- Currency: ${currency} (${currSymbol})
+- User's Available Liquid Cash: ${currSymbol} ${liquidCash || userSettings.allocatedCashForBills}
+- Total Statement Due Across All Accounts: ${currSymbol} ${totalStatementDue.toFixed(2)}
+- Total Non-Negotiable Minimums Due: ${currSymbol} ${totalMinDue.toFixed(2)}
+- Committed Monthly Installments: ${currSymbol} ${totalMonthlyInstallments.toFixed(2)}
 - User's Income Paycheck Dates: Days ${userSettings.paycheckDates.join(' & ')} of each month
 - Chosen Optimization Strategy: ${strategy || userSettings.defaultStrategy}
 
@@ -357,7 +555,7 @@ Please return a JSON response with:
    - "recommendedPayDate": suggested payment date (taking into account grace periods & paycheck dates)
    - "amount": exact amount to pay
    - "paymentType": "full_statement" | "minimum_due" | "optimized_partial"
-   - "rationale": specific mathematical reason (e.g., "Avoids $40 late fee and stops 28.99% APR compounding while preserving 22 days of float")
+   - "rationale": specific mathematical reason (e.g., "Avoids late fee and stops APR compounding while preserving grace float")
    - "urgency": "critical" | "high" | "medium" | "low"
 3. "cashFlowInsight": Analysis of how installments impact monthly cash flow over the next 3-6 months.
 4. "savingsEstimated": Estimated interest and late fees saved through this sequence.
@@ -389,12 +587,12 @@ Please return a JSON response with:
           recommendedPayDate: acc.dueDate,
           amount: acc.statementBalance,
           paymentType: 'full_statement',
-          rationale: `Pay on ${acc.dueDate} to maximize interest-free grace float without risking $${acc.lateFee} late penalty or ${acc.apr}% APR.`,
+          rationale: `Pay on ${acc.dueDate} to maximize interest-free grace float without risking ${currSymbol} ${acc.lateFee} late penalty or ${acc.apr}% APR.`,
           urgency: idx === 0 ? 'critical' : 'high',
         })),
       cashFlowInsight:
-        'Installments currently account for a committed chunk of your monthly outflow. Focus on completing SPayLater first to unlock cash flow.',
-      savingsEstimated: '$119.00 in late fees & finance charges avoided this cycle',
+        'Installments currently account for a committed chunk of your monthly outflow. Focus on completing short-tenure plans first to unlock cash flow.',
+      savingsEstimated: `${currSymbol} 119.00 in late fees & finance charges avoided this cycle`,
       riskAlerts: ['Ensure funds are available 24 hours prior to due dates to avoid bank processing cutoffs.'],
     });
   }
@@ -402,22 +600,36 @@ Please return a JSON response with:
 
 // Serve frontend in dev or prod
 async function start() {
-  if (process.env.NODE_ENV !== 'production') {
+  const isCompiled = typeof __dirname !== 'undefined' && (__dirname.endsWith('dist') || __dirname.includes('/dist'));
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.PROD === 'true' || isCompiled;
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = isCompiled ? path.resolve(__dirname) : path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/')) {
+        return next();
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Port ${PORT} is already in use by dev server process.`);
+    } else {
+      console.error('Server error:', err);
+    }
   });
 }
 

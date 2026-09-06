@@ -55,11 +55,15 @@ npm run build
 npm run start
 ```
 
-### Continuous Integration (GitHub Actions)
-The repository includes a ready-to-run GitHub Actions workflow (`.github/workflows/ci.yml`) that triggers on every push and pull request to `main` / `master`, running:
-- `npm ci`
-- `npm run lint` (TypeScript compilation & type checking)
-- `npm run build` (production build verification)
+### Continuous Integration & Deployment (GitHub Actions)
+The repository includes a complete CI/CD workflow (`.github/workflows/ci.yml`) that triggers on every push to `main` / `master`:
+1. Installs dependencies using fallback-resilient npm lockfile detection.
+2. Runs ESLint and TypeScript checks (`npm run lint`).
+3. Compiles the optimized production build (`npm run build`).
+4. **Deploys directly to GitHub Pages** and generates a live web application URL, printed directly in the GitHub Actions summary and linked in the repository's **Environments** tab.
+
+> **Note to enable GitHub Pages on your repository:**  
+> Go to your GitHub repository **Settings** → **Pages** → under **Build and deployment / Source**, select **GitHub Actions**. Upon your next push, your live web app URL (e.g. `https://<your-username>.github.io/BillFlow/`) will be generated automatically!
 
 ---
 

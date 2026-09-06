@@ -1,9 +1,27 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+  BillAccount, 
+  InstallmentPlan, 
+  UserSettings, 
+  PaymentStrategyType, 
+  CustomAlert,
+  UserProfile,
+  UserDedicatedDatabase
+} from './types';
+import { 
+  INITIAL_ACCOUNTS, 
+  INITIAL_INSTALLMENTS, 
+  INITIAL_SETTINGS 
+} from './data/seedData';
+import { 
+  calculatePaymentSchedule, 
+  generateAlerts, 
+  projectMonthlyCashFlow 
+} from './utils/paymentOptimizer';
+import { UserDatabaseService } from './services/userDatabaseService';
+import { formatCurrency } from './utils/currency';
 
-import React, { useState, useEffect, useMemo } from 'react';
+// Subcomponents
 import { Navbar } from './components/Navbar';
 import { ExecutiveOverview } from './components/ExecutiveOverview';
 import { PaymentOptimizerMatrix } from './components/PaymentOptimizerMatrix';
@@ -12,46 +30,40 @@ import { InstallmentsCashFlowTracker } from './components/InstallmentsCashFlowTr
 import { BankSyncModal } from './components/BankSyncModal';
 import { AIAdvisorModal } from './components/AIAdvisorModal';
 import { AlertsDrawer } from './components/AlertsDrawer';
-import { 
-  BillAccount, 
-  InstallmentPlan, 
-  UserSettings, 
-  PaymentStrategyType, 
-  CustomAlert 
-} from './types';
-import { 
-  calculatePaymentSchedule, 
-  generateAlerts, 
-  projectMonthlyCashFlow 
-} from './utils/paymentOptimizer';
+import { AuthScreen } from './components/AuthScreen';
+import { FamilySyncModal } from './components/FamilySyncModal';
+
 import { 
   Sliders, 
   Calendar, 
   ShoppingBag, 
   Building2, 
-  CreditCard,
-  Wallet,
-  Sparkles, 
+  Plus, 
   RefreshCw, 
   ShieldCheck, 
   Trash2,
-  Edit2
+  Database,
+  ArrowRightLeft,
+  CheckCircle2,
+  CreditCard,
+  Wallet
 } from 'lucide-react';
 
 export default function App() {
-  // State: Accounts
-  const [accounts, setAccounts] = useState<BillAccount[]>([]);
-  // State: Installments
-  const [installments, setInstallments] = useState<InstallmentPlan[]>([]);
-  // State: User settings
-  const [settings, setSettings] = useState<UserSettings>({
-    monthlyIncome: 6500.0,
-    paycheckSchedule: 'bi_monthly',
-    paycheckDates: [1, 15],
-    allocatedCashForBills: 3500.0,
-    alertDaysBeforeDue: [7, 3, 1],
-    defaultStrategy: 'grace_float',
+  // Authentication & Dedicated Database State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    return UserDatabaseService.getActiveUser();
   });
+  const [userDb, setUserDb] = useState<UserDedicatedDatabase | null>(null);
+  const [isFamilySyncOpen, setIsFamilySyncOpen] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('Saved');
+
+  // State: Accounts
+  const [accounts, setAccounts] = useState<BillAccount[]>(INITIAL_ACCOUNTS);
+  // State: Installments
+  const [installments, setInstallments] = useState<InstallmentPlan[]>(INITIAL_INSTALLMENTS);
+  // State: User settings
+  const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
   // Active view tab
   const [activeTab, setActiveTab] = useState<'optimizer' | 'cycle_matrix' | 'installments' | 'accounts'>('optimizer');
@@ -77,52 +89,76 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('Just now');
 
-  // Fetch initial accounts and installments from server
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [accRes, instRes] = await Promise.all([
-          fetch('/api/accounts'),
-          fetch('/api/installments'),
-        ]);
-        if (accRes.ok) {
-          const accData = await accRes.json();
-          setAccounts(accData.accounts || []);
-          if (accData.settings) {
-            setSettings(accData.settings);
-            setAllocatedCash(accData.settings.allocatedCashForBills || 3500);
-            setStrategy(accData.settings.defaultStrategy || 'grace_float');
-          }
-        }
-        if (instRes.ok) {
-          const instData = await instRes.json();
-          setInstallments(instData.installments || []);
-        }
-      } catch (err) {
-        console.error('Failed to load initial data:', err);
+  // Load dedicated database when user logs in or switches
+  const loadDedicatedUserDatabase = useCallback((user: UserProfile) => {
+    try {
+      const db = UserDatabaseService.loadUserDatabase(user.id);
+      setUserDb(db);
+      setAccounts(db.accounts || []);
+      setInstallments(db.installments || []);
+      if (db.settings) {
+        setSettings(db.settings);
+        setAllocatedCash(db.settings.allocatedCashForBills || 3500);
+        setStrategy(db.settings.defaultStrategy || 'grace_float');
       }
+      setPaidScheduleIds(new Set(db.paidScheduleIds || []));
+      setScheduledScheduleIds(new Set(db.scheduledScheduleIds || []));
+      setAlertThresholds(db.alertThresholds || [7, 3, 1]);
+      setAutoSaveStatus('Loaded');
+    } catch (err) {
+      console.error('Failed to load user database:', err);
     }
-    loadData();
   }, []);
 
-  // Update dynamic alerts whenever accounts or installments change
+  // Initial load effect
+  useEffect(() => {
+    if (currentUser) {
+      loadDedicatedUserDatabase(currentUser);
+    }
+  }, [currentUser, loadDedicatedUserDatabase]);
+
+  // Auto-save helper to ensure all user inputs are persisted automatically to dedicated DB
+  const triggerAutoSave = useCallback((
+    updatedAccounts: BillAccount[],
+    updatedInstallments: InstallmentPlan[],
+    updatedSettings: UserSettings,
+    updatedPaid: Set<string>,
+    updatedScheduled: Set<string>
+  ) => {
+    if (!currentUser) return;
+    setAutoSaveStatus('Saving...');
+    try {
+      const dbToSave: UserDedicatedDatabase = {
+        databaseId: currentUser.databaseId,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        lastUpdated: new Date().toISOString(),
+        version: (userDb?.version || 1) + 1,
+        accounts: updatedAccounts,
+        installments: updatedInstallments,
+        settings: updatedSettings,
+        paidScheduleIds: Array.from(updatedPaid),
+        scheduledScheduleIds: Array.from(updatedScheduled),
+        alertThresholds,
+      };
+      UserDatabaseService.saveUserDatabase(dbToSave);
+      setUserDb(dbToSave);
+      setAutoSaveStatus(`Auto-saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    } catch (err) {
+      console.error('Auto-save error:', err);
+      setAutoSaveStatus('Local state active');
+    }
+  }, [currentUser, userDb, alertThresholds]);
+
+  // Update dynamic alerts whenever accounts, installments, or currency changes
   useEffect(() => {
     if (accounts.length > 0) {
-      const generated = generateAlerts(accounts, installments);
+      const generated = generateAlerts(accounts, installments, settings.currency || 'MYR');
       setAlerts(generated);
     }
-  }, [accounts, installments]);
+  }, [accounts, installments, settings.currency]);
 
   // Calculations
-  const totalStatementDue = useMemo(
-    () => accounts.reduce((sum, a) => sum + a.statementBalance, 0),
-    [accounts]
-  );
-  const totalMinRequired = useMemo(
-    () => accounts.reduce((sum, a) => sum + a.minPayment, 0),
-    [accounts]
-  );
-
   const schedule = useMemo(
     () => calculatePaymentSchedule(accounts, strategy, allocatedCash, settings.paycheckDates),
     [accounts, strategy, allocatedCash, settings.paycheckDates]
@@ -133,19 +169,56 @@ export default function App() {
     [accounts, installments, settings.monthlyIncome]
   );
 
+  // User Authenticated Handler
+  const handleUserAuthenticated = (user: UserProfile) => {
+    setCurrentUser(user);
+    loadDedicatedUserDatabase(user);
+  };
+
+  // Switch User Profile Handler
+  const handleSwitchUser = (newUser: UserProfile) => {
+    UserDatabaseService.setActiveUser(newUser.id);
+    setCurrentUser(newUser);
+    loadDedicatedUserDatabase(newUser);
+  };
+
+  // Logout Handler
+  const handleLogout = () => {
+    UserDatabaseService.logout();
+    setCurrentUser(null);
+    setUserDb(null);
+  };
+
+  // Database Updated from Family Sync
+  const handleDatabaseUpdated = (updatedDb: UserDedicatedDatabase) => {
+    setUserDb(updatedDb);
+    setAccounts(updatedDb.accounts || []);
+    setInstallments(updatedDb.installments || []);
+    if (updatedDb.settings) {
+      setSettings(updatedDb.settings);
+      setAllocatedCash(updatedDb.settings.allocatedCashForBills || 3500);
+      setStrategy(updatedDb.settings.defaultStrategy || 'grace_float');
+    }
+    setAutoSaveStatus('Synchronized');
+  };
+
   // Sync all balances with Open Banking API simulation
   const handleSyncAll = async (provider = 'OpenBanking Sandbox') => {
     setIsSyncing(true);
     try {
-      const res = await fetch('/api/sync-bank', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider }),
+      // Simulate live balance drift
+      const drifted = accounts.map((acc) => {
+        const drift = (Math.random() - 0.5) * 30;
+        const newTotal = Math.max(acc.statementBalance, Math.round((acc.totalBalance + drift) * 100) / 100);
+        return {
+          ...acc,
+          totalBalance: newTotal,
+          lastSyncedAt: new Date().toISOString(),
+          status: 'synced' as const,
+        };
       });
-      const data = await res.json();
-      if (data.accounts) {
-        setAccounts(data.accounts);
-      }
+      setAccounts(drifted);
+      triggerAutoSave(drifted, installments, settings, paidScheduleIds, scheduledScheduleIds);
       setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     } catch (err) {
       console.error('Sync failed:', err);
@@ -156,76 +229,67 @@ export default function App() {
 
   // Add new account
   const handleAddAccount = async (newAcc: Omit<BillAccount, 'id' | 'apiSynced' | 'lastSyncedAt' | 'status' | 'accountNumberMask'>) => {
-    try {
-      const res = await fetch('/api/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAcc),
-      });
-      const created = await res.json();
-      setAccounts((prev) => [...prev, created]);
-    } catch (err) {
-      console.error('Failed to add account:', err);
-    }
+    const created: BillAccount = {
+      ...newAcc,
+      id: `acc-${Date.now()}`,
+      apiSynced: false,
+      lastSyncedAt: new Date().toISOString(),
+      status: 'active',
+      accountNumberMask: `•••• ${Math.floor(1000 + Math.random() * 9000)}`,
+      ownerName: currentUser ? `${currentUser.name} (${currentUser.familyRole})` : undefined,
+      ownerRole: currentUser?.familyRole,
+    };
+    const nextAccounts = [...accounts, created];
+    setAccounts(nextAccounts);
+    triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds);
   };
 
   // Delete account
   const handleDeleteAccount = async (id: string) => {
-    try {
-      await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
-      setAccounts((prev) => prev.filter((a) => a.id !== id));
-      setInstallments((prev) => prev.filter((i) => i.accountId !== id));
-    } catch (err) {
-      console.error('Failed to delete account:', err);
-    }
+    const nextAccounts = accounts.filter((a) => a.id !== id);
+    const nextInstallments = installments.filter((i) => i.accountId !== id);
+    setAccounts(nextAccounts);
+    setInstallments(nextInstallments);
+    triggerAutoSave(nextAccounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds);
   };
 
   // Add new installment plan
   const handleAddInstallment = async (plan: Omit<InstallmentPlan, 'id'>) => {
-    try {
-      const res = await fetch('/api/installments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(plan),
-      });
-      const created = await res.json();
-      setInstallments((prev) => [...prev, created]);
-    } catch (err) {
-      console.error('Failed to add installment:', err);
-    }
+    const created: InstallmentPlan = {
+      ...plan,
+      id: `inst-${Date.now()}`,
+      ownerName: currentUser ? `${currentUser.name} (${currentUser.familyRole})` : undefined,
+      ownerRole: currentUser?.familyRole,
+    };
+    const nextInstallments = [...installments, created];
+    setInstallments(nextInstallments);
+    triggerAutoSave(accounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds);
   };
 
   // Delete installment plan
   const handleDeleteInstallment = async (id: string) => {
-    try {
-      await fetch(`/api/installments/${id}`, { method: 'DELETE' });
-      setInstallments((prev) => prev.filter((i) => i.id !== id));
-    } catch (err) {
-      console.error('Failed to delete installment:', err);
-    }
+    const nextInstallments = installments.filter((i) => i.id !== id);
+    setInstallments(nextInstallments);
+    triggerAutoSave(accounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds);
   };
 
   // Toggle paid / scheduled status for schedule items
   const handleToggleScheduleStatus = (scheduleId: string) => {
+    let nextPaid = new Set(paidScheduleIds);
+    let nextScheduled = new Set(scheduledScheduleIds);
+
     if (paidScheduleIds.has(scheduleId)) {
-      // Unmark
-      setPaidScheduleIds((prev) => {
-        const next = new Set(prev);
-        next.delete(scheduleId);
-        return next;
-      });
+      nextPaid.delete(scheduleId);
     } else if (scheduledScheduleIds.has(scheduleId)) {
-      // Move from scheduled to paid
-      setScheduledScheduleIds((prev) => {
-        const next = new Set(prev);
-        next.delete(scheduleId);
-        return next;
-      });
-      setPaidScheduleIds((prev) => new Set(prev).add(scheduleId));
+      nextScheduled.delete(scheduleId);
+      nextPaid.add(scheduleId);
     } else {
-      // Move to scheduled
-      setScheduledScheduleIds((prev) => new Set(prev).add(scheduleId));
+      nextScheduled.add(scheduleId);
     }
+
+    setPaidScheduleIds(nextPaid);
+    setScheduledScheduleIds(nextScheduled);
+    triggerAutoSave(accounts, installments, settings, nextPaid, nextScheduled);
   };
 
   // Mark single alert as read
@@ -238,18 +302,82 @@ export default function App() {
     setAlerts([]);
   };
 
+  // Helper: Account icon selector
+  const renderAccountTypeIcon = (type: string) => {
+    switch (type) {
+      case 'credit_card':
+        return <CreditCard className="w-4 h-4 text-white" />;
+      case 'ewallet_pay_later':
+        return <Wallet className="w-4 h-4 text-white" />;
+      case 'bank_account':
+      default:
+        return <Building2 className="w-4 h-4 text-white" />;
+    }
+  };
+
+  const getAccountTypeLabel = (type: string) => {
+    switch (type) {
+      case 'credit_card':
+        return 'Credit Card';
+      case 'ewallet_pay_later':
+        return 'E-Wallet / BNPL';
+      case 'bank_account':
+        return 'Bank Account';
+      default:
+        return type;
+    }
+  };
+
+  // If no user is authenticated, mandate registration or sign-in
+  if (!currentUser) {
+    return <AuthScreen onAuthenticated={handleUserAuthenticated} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-indigo-500 selection:text-white pb-16">
       {/* Top Navigation */}
       <Navbar
+        currentUser={currentUser}
         alerts={alerts}
         onOpenAlerts={() => setIsAlertsOpen(true)}
         onOpenConnectBank={() => setIsConnectBankOpen(true)}
         onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
+        onOpenFamilySync={() => setIsFamilySyncOpen(true)}
+        onLogout={handleLogout}
         onSyncAll={() => handleSyncAll()}
         isSyncing={isSyncing}
         lastSyncedTime={lastSyncedTime}
       />
+
+      {/* Dedicated Database Status Banner */}
+      <div className="bg-slate-900/60 border-b border-slate-800/80 px-4 sm:px-6 lg:px-8 py-2">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-slate-300 font-medium">
+              Dedicated Database: <code className="font-mono text-indigo-300 font-semibold">{currentUser.databaseId}</code>
+            </span>
+            <span className="text-slate-600 hidden sm:inline">•</span>
+            <span className="text-slate-400 hidden sm:inline">
+              Assigned to: <strong className="text-white">{currentUser.name}</strong> ({currentUser.familyRole})
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-slate-400 text-[11px] flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{autoSaveStatus}</span>
+            </span>
+            <button
+              onClick={() => setIsFamilySyncOpen(true)}
+              className="text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer flex items-center gap-1 hover:underline text-[11px]"
+            >
+              <ArrowRightLeft className="w-3 h-3" />
+              <span>Sync with Family</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
@@ -321,104 +449,108 @@ export default function App() {
             accounts={accounts}
             schedule={schedule}
             strategy={strategy}
-            onSelectStrategy={setStrategy}
+            onStrategyChange={(strat) => {
+              setStrategy(strat);
+              const updated = { ...settings, defaultStrategy: strat };
+              setSettings(updated);
+              triggerAutoSave(accounts, installments, updated, paidScheduleIds, scheduledScheduleIds);
+            }}
             allocatedCash={allocatedCash}
-            onUpdateAllocatedCash={setAllocatedCash}
-            totalStatementDue={totalStatementDue}
-            totalMinRequired={totalMinRequired}
-            onToggleStatus={handleToggleScheduleStatus}
+            onAllocatedCashChange={(val) => {
+              setAllocatedCash(val);
+              const updated = { ...settings, allocatedCashForBills: val };
+              setSettings(updated);
+              triggerAutoSave(accounts, installments, updated, paidScheduleIds, scheduledScheduleIds);
+            }}
             paidScheduleIds={paidScheduleIds}
             scheduledScheduleIds={scheduledScheduleIds}
+            onToggleStatus={handleToggleScheduleStatus}
+            onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
           />
         )}
 
-        {/* Tab 2: Cycle Dates & Grace Float Architecture */}
-        {activeTab === 'cycle_matrix' && <CycleGraceVisualizer accounts={accounts} />}
+        {/* Tab 2: Billing Cycle & Grace Float Matrix */}
+        {activeTab === 'cycle_matrix' && (
+          <CycleGraceVisualizer
+            accounts={accounts}
+            currency={settings.currency || 'MYR'}
+          />
+        )}
 
-        {/* Tab 3: Multi-Month Installments & Cash Flow Trajectory */}
+        {/* Tab 3: Multi-Month Installments Tracker */}
         {activeTab === 'installments' && (
           <InstallmentsCashFlowTracker
-            accounts={accounts}
             installments={installments}
+            accounts={accounts}
             projections={projections}
             onAddInstallment={handleAddInstallment}
             onDeleteInstallment={handleDeleteInstallment}
+            currency={settings.currency || 'MYR'}
           />
         )}
 
-        {/* Tab 4: Linked Accounts & Open Banking Hub */}
+        {/* Tab 4: Connected Accounts Manager */}
         {activeTab === 'accounts' && (
-          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 sm:p-6 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
-                    <Building2 className="w-5 h-5" />
-                  </span>
-                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                    Synced Financial Accounts Hub
-                  </h2>
-                </div>
-                <p className="text-xs sm:text-sm text-slate-400 mt-1">
-                  Manage credit card lines, e-wallet pay later limits, statement cycle days, and grace period settings.
+                <h2 className="text-base font-bold text-white">Linked Accounts Hub</h2>
+                <p className="text-xs text-slate-400">
+                  Manage credit cards, e-wallets, and banking relationships stored in your dedicated database.
                 </p>
               </div>
-
-              <button
-                onClick={() => setIsConnectBankOpen(true)}
-                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
-              >
-                <span>+ Connect New Account</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsFamilySyncOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-500/40 bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>Sync Partner Accounts</span>
+                </button>
+                <button
+                  onClick={() => setIsConnectBankOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/20"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Link New Account</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {accounts.map((acc) => {
-                const utilRatio = Math.round((acc.totalBalance / acc.creditLimit) * 100);
-
-                const getAccountTypeIcon = (accType: string) => {
-                  if (accType === 'bank_account') return <Building2 className="w-4 h-4" />;
-                  if (accType === 'ewallet_pay_later') return <Wallet className="w-4 h-4" />;
-                  return <CreditCard className="w-4 h-4" />;
-                };
-
-                const getAccountTypeLabel = (accType: string) => {
-                  if (accType === 'bank_account') return 'Bank Credit Line';
-                  if (accType === 'ewallet_pay_later') return 'Pay Later E-Wallet';
-                  return 'Credit Card';
-                };
+                const utilRatio = Math.round((acc.statementBalance / (acc.creditLimit || 1)) * 100);
 
                 return (
                   <div
                     key={acc.id}
-                    className="bg-slate-800/40 rounded-xl border border-slate-800 p-4 space-y-3 relative group hover:border-slate-700 transition-all"
+                    className="p-4 rounded-2xl border border-slate-800 bg-slate-900/80 hover:border-slate-700 transition-all space-y-3 relative group"
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div
-                          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-sm transition-transform group-hover:scale-105"
-                          style={{
-                            backgroundColor: `${acc.color}18`,
-                            borderColor: `${acc.color}45`,
-                            color: acc.color,
-                          }}
-                          title={getAccountTypeLabel(acc.type)}
+                          className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shadow-md"
+                          style={{ backgroundColor: acc.color }}
                         >
-                          {getAccountTypeIcon(acc.type)}
+                          {renderAccountTypeIcon(acc.type)}
                         </div>
                         <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-sm text-white">{acc.name}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-white text-sm">{acc.name}</span>
                             <span
-                              className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider border"
+                              className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
                               style={{
-                                backgroundColor: `${acc.color}15`,
-                                borderColor: `${acc.color}35`,
+                                backgroundColor: `${acc.color}20`,
                                 color: acc.color,
                               }}
                             >
                               {getAccountTypeLabel(acc.type)}
                             </span>
+                            {acc.ownerName && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-slate-800 border border-slate-700 text-slate-300">
+                                {acc.ownerName}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[11px] text-slate-400">{acc.institution} • {acc.accountNumberMask}</div>
                         </div>
@@ -436,11 +568,11 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-700/50">
                       <div>
                         <span className="text-[11px] text-slate-400">Total Balance</span>
-                        <div className="font-bold text-white">${acc.totalBalance.toFixed(2)}</div>
+                        <div className="font-bold text-white">{formatCurrency(acc.totalBalance, settings.currency)}</div>
                       </div>
                       <div>
                         <span className="text-[11px] text-slate-400">Statement Due</span>
-                        <div className="font-bold text-amber-400">${acc.statementBalance.toFixed(2)}</div>
+                        <div className="font-bold text-amber-400">{formatCurrency(acc.statementBalance, settings.currency)}</div>
                       </div>
                       <div>
                         <span className="text-[11px] text-slate-400">Cycle Cutoff</span>
@@ -456,14 +588,14 @@ export default function App() {
                       </div>
                       <div>
                         <span className="text-[11px] text-slate-400">Late Penalty</span>
-                        <div className="font-medium text-rose-400">${acc.lateFee}</div>
+                        <div className="font-medium text-rose-400">{formatCurrency(acc.lateFee, settings.currency)}</div>
                       </div>
                     </div>
 
                     {/* Utilization mini-bar */}
                     <div className="space-y-1 pt-1">
                       <div className="flex items-center justify-between text-[10px] text-slate-400">
-                        <span>Limit: ${acc.creditLimit.toLocaleString()}</span>
+                        <span>Limit: {formatCurrency(acc.creditLimit, settings.currency)}</span>
                         <span className={utilRatio > 50 ? 'text-rose-400 font-bold' : 'text-slate-300'}>
                           {utilRatio}% used
                         </span>
@@ -507,6 +639,7 @@ export default function App() {
         onAddAccount={handleAddAccount}
         onSyncBank={handleSyncAll}
         isSyncing={isSyncing}
+        currency={settings.currency || 'MYR'}
       />
 
       <AIAdvisorModal
@@ -515,6 +648,7 @@ export default function App() {
         accounts={accounts}
         strategy={strategy}
         liquidCash={allocatedCash}
+        currency={settings.currency || 'MYR'}
       />
 
       <AlertsDrawer
@@ -526,6 +660,18 @@ export default function App() {
         alertThresholds={alertThresholds}
         onUpdateThresholds={setAlertThresholds}
       />
+
+      {/* Family Synchronization & Export/Import Modal */}
+      {userDb && (
+        <FamilySyncModal
+          isOpen={isFamilySyncOpen}
+          onClose={() => setIsFamilySyncOpen(false)}
+          currentUser={currentUser}
+          currentDb={userDb}
+          onDatabaseUpdated={handleDatabaseUpdated}
+          onSwitchUser={handleSwitchUser}
+        />
+      )}
     </div>
   );
 }
