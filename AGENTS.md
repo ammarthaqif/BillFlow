@@ -15,3 +15,12 @@
 3. **CI/CD & Deployment:**
    - GitHub Actions workflow in `.github/workflows/ci.yml` validates `npm run lint` and `npm run build` on push and PR.
    - Zero-dependency runtime crashes: avoid `import.meta.url` in bundled CommonJS environments.
+   - **GitHub Actions Lockfile Requirement (Mandatory Directive):**
+     - GitHub's `actions/setup-node@v4` with `cache: 'npm'` strictly requires `package-lock.json` (it does not recognize `bun.lock`).
+     - Always generate and maintain `package-lock.json` in the root repository.
+     - In `.github/workflows/ci.yml`, always use conditional caching: `cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}`.
+     - In installation steps, always use fallback resilience:
+       ```bash
+       if [ -f package-lock.json ]; then npm ci; else npm install; fi
+       ```
+     - Never add `package-lock.json` to `.gitignore`.
