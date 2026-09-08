@@ -1,8 +1,75 @@
 import { CurrencyCode } from './utils/currency';
 
-export type AccountType = 'credit_card' | 'ewallet_pay_later' | 'bank_account';
+export type { CurrencyCode };
+
+export type AccountType = 
+  | 'credit_card' 
+  | 'ewallet_pay_later' 
+  | 'personal_loan' 
+  | 'housing_loan' 
+  | 'automotive_loan' 
+  | 'bank_account' 
+  | 'other_loan';
 
 export type PaymentStrategyType = 'grace_float' | 'avalanche' | 'snowball' | 'cashflow_buffer';
+
+export type PaymentMode = 'credit_card' | 'bnpl' | 'cash';
+export type RepaymentStructure = 'lump_sum' | 'split_months';
+
+export type ExpenseCategory = 
+  | 'Phone & Mobile'
+  | 'Internet & Broadband'
+  | 'Utilities (Electricity, Water, IWK)'
+  | 'Entertainment & Streaming'
+  | 'Retail & Shopping'
+  | 'Dining & Groceries' 
+  | 'Shopping & Retail' 
+  | 'Electronics & Gadgets' 
+  | 'Travel & Transit' 
+  | 'Home & Utilities' 
+  | 'Vehicle & Fuel' 
+  | 'Healthcare & Medical' 
+  | 'Education' 
+  | 'Loan Repayment' 
+  | 'Entertainment' 
+  | 'Other';
+
+export type SettlementStatus = 'unsettled' | 'settled' | 'converted_to_installment';
+
+export type SettlementMethod = 
+  | 'instant_fpx' 
+  | 'debit_card' 
+  | 'bank_transfer' 
+  | 'duitnow_qr' 
+  | 'cash_funds';
+
+export interface ExpenseItem {
+  id: string;
+  accountId: string;
+  accountName: string;
+  accountType: AccountType;
+  paymentMode?: PaymentMode;
+  repaymentStructure?: RepaymentStructure;
+  splitMonths?: number;
+  monthlySplitAmount?: number;
+  splitFeeRate?: number;
+  linkedInstallmentId?: string;
+  title: string;
+  merchant?: string;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  category: ExpenseCategory;
+  status: SettlementStatus;
+  notes?: string;
+  ownerName?: string;
+  ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
+  settledAt?: string;
+  settlementMethod?: SettlementMethod;
+  settlementReference?: string;
+  settledFromAccountId?: string;
+  interestAvoidedEstimate?: number;
+  convertedInstallmentId?: string;
+}
 
 export interface BillAccount {
   id: string;
@@ -120,6 +187,17 @@ export interface AIAdvisorResponse {
 
 export type FamilyRole = 'husband' | 'wife' | 'partner' | 'parent' | 'member';
 
+export type UserTier = 'free' | 'pro';
+
+export interface UserTierLimits {
+  maxAccounts: number;
+  maxStandingInstructions: number;
+  monthlyAiConsultations: number;
+  monthlyReceiptExtractions: number;
+  aiConsultationsUsed: number;
+  receiptExtractionsUsed: number;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -128,6 +206,52 @@ export interface UserProfile {
   householdName: string;
   createdAt: string;
   databaseId: string;
+  tier: UserTier;
+  tierLimits?: UserTierLimits;
+}
+
+export type StandingInstructionFrequency = 'monthly' | 'weekly' | 'bi_weekly' | 'quarterly' | 'yearly';
+export type StandingInstructionMethod = 
+  | 'bank_standing_instruction' 
+  | 'direct_debit_duitnow' 
+  | 'auto_card_charge' 
+  | 'scheduled_fpx';
+
+export interface StandingInstruction {
+  id: string;
+  title: string;
+  billerOrRecipient: string;
+  amount: number;
+  frequency: StandingInstructionFrequency;
+  executionDay: number; // 1-31 (day of month)
+  sourceAccountId: string; // ID of linked bank or card account
+  sourceAccountName: string;
+  method: StandingInstructionMethod;
+  category: ExpenseCategory;
+  isActive: boolean;
+  autoExecuted: boolean;
+  startDate: string;
+  endDate?: string;
+  nextExecutionDate: string; // YYYY-MM-DD
+  referenceNumber?: string;
+  notes?: string;
+  ownerName?: string;
+  ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
+  lastExecutedAt?: string;
+  createdAt?: string;
+}
+
+export interface ExtractedReceiptData {
+  merchant: string;
+  amount: number;
+  date: string;
+  category: ExpenseCategory;
+  referenceNumber?: string;
+  taxAmount?: number;
+  lineItems?: Array<{ description: string; price: number }>;
+  suggestedPaymentMode?: PaymentMode;
+  confidenceScore?: number;
+  notes?: string;
 }
 
 export interface UserDedicatedDatabase {
@@ -138,6 +262,8 @@ export interface UserDedicatedDatabase {
   version: number;
   accounts: BillAccount[];
   installments: InstallmentPlan[];
+  expenses?: ExpenseItem[];
+  standingInstructions?: StandingInstruction[];
   settings: UserSettings;
   paidScheduleIds: string[];
   scheduledScheduleIds: string[];
@@ -159,11 +285,13 @@ export interface FamilySyncPackage {
   data: {
     accounts: BillAccount[];
     installments: InstallmentPlan[];
+    expenses?: ExpenseItem[];
     settings?: Partial<UserSettings>;
   };
   summary: {
     totalAccounts: number;
     totalInstallments: number;
+    totalExpenses?: number;
     totalDebt: number;
     totalMonthlyInstallments: number;
   };

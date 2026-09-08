@@ -56,9 +56,13 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
   const popularProviders = [
     { name: 'Chase Bank', type: 'credit_card' as AccountType, icon: '🏦', color: '#1e40af', desc: 'Freedom, Sapphire, Ink' },
     { name: 'American Express', type: 'credit_card' as AccountType, icon: '💳', color: '#b45309', desc: 'Platinum, Gold, Blue Cash' },
-    { name: 'Citibank', type: 'credit_card' as AccountType, icon: '🏛️', color: '#0284c7', desc: 'Custom Cash, Double Cash' },
     { name: 'GrabPay Later', type: 'ewallet_pay_later' as AccountType, icon: '🟢', color: '#059669', desc: 'Postpaid & 4-Month Installments' },
     { name: 'Shopee SPayLater', type: 'ewallet_pay_later' as AccountType, icon: '🛒', color: '#ea580c', desc: '1, 3, 6, 12 Month Pay Later' },
+    { name: 'CIMB Cash Plus Loan', type: 'personal_loan' as AccountType, icon: '💼', color: '#9333ea', desc: 'Fixed Amortization Personal Financing' },
+    { name: 'Maybank MaxiHome', type: 'housing_loan' as AccountType, icon: '🏠', color: '#2563eb', desc: 'Home Mortgage Loan & Principle' },
+    { name: 'Public Bank Auto HP', type: 'automotive_loan' as AccountType, icon: '🚗', color: '#d97706', desc: 'Vehicle Hire Purchase Car Loan' },
+    { name: 'Citibank', type: 'credit_card' as AccountType, icon: '🏛️', color: '#0284c7', desc: 'Custom Cash, Double Cash' },
+    { name: 'Maybank Savings Buffer', type: 'bank_account' as AccountType, icon: '💰', color: '#10b981', desc: 'Liquid Cash & Immediate Settlement Source' },
     { name: 'Apple Card & Pay Later', type: 'credit_card' as AccountType, icon: '🍎', color: '#475569', desc: 'Mastercard & Apple Pay Later' },
     { name: 'Klarna', type: 'ewallet_pay_later' as AccountType, icon: '🛍️', color: '#db2777', desc: 'Pay in 4 & Monthly Financing' },
     { name: 'Capital One', type: 'credit_card' as AccountType, icon: '💳', color: '#dc2626', desc: 'Venture, Savor, QuickSilver' },
@@ -67,20 +71,23 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
   const handleConnectProvider = (providerName: string, provType: AccountType, provColor: string) => {
     setConnectingProvider(providerName);
     setTimeout(() => {
+      const isLoan = provType === 'personal_loan' || provType === 'housing_loan' || provType === 'automotive_loan';
+      const isBank = provType === 'bank_account';
+      
       onAddAccount({
         name: `${providerName} Premium`,
         institution: providerName,
         type: provType,
         color: provColor,
-        totalBalance: Math.floor(600 + Math.random() * 1800),
-        statementBalance: Math.floor(400 + Math.random() * 1200),
-        creditLimit: provType === 'credit_card' ? 8000 : 2000,
-        apr: provType === 'credit_card' ? 24.99 : 15.0,
-        lateFee: provType === 'credit_card' ? 40 : 15,
+        totalBalance: isLoan ? 45000 : isBank ? 6500 : Math.floor(600 + Math.random() * 1800),
+        statementBalance: isLoan ? 850 : isBank ? 0 : Math.floor(400 + Math.random() * 1200),
+        creditLimit: isLoan ? 50000 : isBank ? 6500 : provType === 'credit_card' ? 8000 : 2000,
+        apr: provType === 'credit_card' ? 24.99 : provType === 'personal_loan' ? 7.8 : provType === 'housing_loan' ? 4.15 : provType === 'automotive_loan' ? 3.1 : isBank ? 0 : 15.0,
+        lateFee: isLoan ? 30 : provType === 'credit_card' ? 40 : 15,
         cycleDay: Math.floor(5 + Math.random() * 20),
-        gracePeriodDays: provType === 'credit_card' ? 25 : 14,
+        gracePeriodDays: provType === 'credit_card' ? 25 : isLoan ? 10 : 14,
         dueDate: '2026-10-22',
-        minPayment: 50,
+        minPayment: isLoan ? 850 : 50,
       });
       setConnectingProvider(null);
       onClose();
@@ -89,11 +96,24 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const getColorForType = (t: AccountType) => {
+      switch (t) {
+        case 'credit_card': return '#3b82f6';
+        case 'ewallet_pay_later': return '#f97316';
+        case 'personal_loan': return '#9333ea';
+        case 'housing_loan': return '#2563eb';
+        case 'automotive_loan': return '#d97706';
+        case 'bank_account': return '#10b981';
+        case 'other_loan':
+        default: return '#64748b';
+      }
+    };
+
     onAddAccount({
       name,
       institution,
       type,
-      color: type === 'credit_card' ? '#3b82f6' : type === 'bank_account' ? '#10b981' : '#f97316',
+      color: getColorForType(type),
       totalBalance,
       statementBalance,
       creditLimit,
@@ -226,7 +246,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   type="text"
                   required
                   placeholder="e.g. Citi Custom Cash"
-                  value={name}
+                  value={name ?? ''}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
@@ -238,7 +258,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   type="text"
                   required
                   placeholder="e.g. Citibank"
-                  value={institution}
+                  value={institution ?? ''}
                   onChange={(e) => setInstitution(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
@@ -249,13 +269,17 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Account Type</label>
                 <select
-                  value={type}
+                  value={type ?? 'credit_card'}
                   onChange={(e) => setType(e.target.value as AccountType)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="credit_card">Credit Card</option>
-                  <option value="ewallet_pay_later">E-Wallet Pay Later</option>
-                  <option value="bank_account">Bank Account / Credit Line</option>
+                  <option value="credit_card">Credit Card (Revolving)</option>
+                  <option value="ewallet_pay_later">E-Wallet / BNPL Pay Later</option>
+                  <option value="personal_loan">Personal Loan (Fixed Installment)</option>
+                  <option value="housing_loan">Housing Loan / Mortgage</option>
+                  <option value="automotive_loan">Automotive / Car Hire Purchase</option>
+                  <option value="bank_account">Bank Account / Liquid Buffer</option>
+                  <option value="other_loan">Other Credit Facility</option>
                 </select>
               </div>
 
@@ -268,7 +292,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   required
                   min="0"
                   step="10"
-                  value={totalBalance}
+                  value={totalBalance ?? 0}
                   onChange={(e) => setTotalBalance(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
@@ -283,7 +307,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   required
                   min="0"
                   step="10"
-                  value={statementBalance}
+                  value={statementBalance ?? 0}
                   onChange={(e) => setStatementBalance(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
@@ -297,7 +321,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   type="number"
                   step="0.1"
                   required
-                  value={apr}
+                  value={apr ?? 0}
                   onChange={(e) => setApr(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
@@ -310,7 +334,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                 <input
                   type="number"
                   required
-                  value={lateFee}
+                  value={lateFee ?? 0}
                   onChange={(e) => setLateFee(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
@@ -323,7 +347,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   min="1"
                   max="31"
                   required
-                  value={cycleDay}
+                  value={cycleDay ?? 1}
                   onChange={(e) => setCycleDay(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
@@ -336,7 +360,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   min="5"
                   max="45"
                   required
-                  value={gracePeriodDays}
+                  value={gracePeriodDays ?? 20}
                   onChange={(e) => setGracePeriodDays(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
@@ -349,7 +373,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                 <input
                   type="date"
                   required
-                  value={dueDate}
+                  value={dueDate ?? ''}
                   onChange={(e) => setDueDate(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
@@ -363,7 +387,7 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   type="number"
                   min="0"
                   required
-                  value={minPayment}
+                  value={minPayment ?? 0}
                   onChange={(e) => setMinPayment(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />

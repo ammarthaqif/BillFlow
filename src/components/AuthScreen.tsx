@@ -2,53 +2,38 @@ import React, { useState } from 'react';
 import { 
   ShieldCheck, 
   Database, 
-  Users, 
-  ArrowRight, 
   KeyRound, 
   Mail, 
   User, 
   Heart, 
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  Zap,
+  Info
 } from 'lucide-react';
 import { UserProfile, FamilyRole } from '../types';
-import { UserDatabaseService, PRESET_FAMILY_USERS } from '../services/userDatabaseService';
+import { UserDatabaseService } from '../services/userDatabaseService';
 
 interface AuthScreenProps {
   onAuthenticated: (user: UserProfile) => void;
 }
 
 export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(true);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [passphrase, setPassphrase] = useState('');
   const [familyRole, setFamilyRole] = useState<FamilyRole>('husband');
   const [householdName, setHouseholdName] = useState('My Household');
   const [starterData, setStarterData] = useState<'standard' | 'wife_starter' | 'blank'>('standard');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Quick switch to pre-configured preset profile (Husband or Wife)
-  const handleQuickPresetLogin = (preset: UserProfile) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const user = UserDatabaseService.setActiveUser(preset.id);
-      if (user) {
-        onAuthenticated(user);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to authenticate');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Sign in by email
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
-      setError('Please enter your email address.');
+      setError('Please enter your registered email address.');
       return;
     }
     setIsLoading(true);
@@ -61,7 +46,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         UserDatabaseService.setActiveUser(existing.id);
         onAuthenticated(existing);
       } else {
-        setError(`No account found for ${email}. Please register below to assign a dedicated database.`);
+        setError(`No account found for ${email}. Please register your free account below.`);
       }
     } catch (err: any) {
       setError(err.message || 'Sign in failed');
@@ -70,11 +55,11 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     }
   };
 
-  // Register new user with dedicated database
+  // Register new user with dedicated database & Free Tier limits
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !email.trim()) {
-      setError('Please enter both your name and email address.');
+      setError('Please provide your name and email address to create your account.');
       return;
     }
     setIsLoading(true);
@@ -118,49 +103,40 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             BillFlow
           </h1>
           <p className="text-sm text-slate-400 max-w-md mx-auto">
-            Payment sequencer & cash flow strategizer with dedicated per-user databases and seamless family data synchronization.
+            Sequencing engine for bills, loans, BNPL, credit cards, and scheduled standing instructions with dedicated per-user storage.
           </p>
         </div>
 
-        {/* Quick Family Demo Switcher */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-              <Users className="w-4 h-4 text-indigo-400" />
-              <span>Instant Family Demo Profiles:</span>
+        {/* Free Plan Limits Showcase Banner */}
+        <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 shadow-xl">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] tracking-wide uppercase flex items-center gap-1">
+                <Zap className="w-3 h-3 text-emerald-400" />
+                Free Account Tier
+              </div>
+              <span className="text-xs font-bold text-white">Included Quotas & Capabilities</span>
             </div>
-            <span className="text-[11px] text-slate-500">1-click login with dedicated DB</span>
+            <span className="text-[11px] text-slate-400">No credit card required</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {PRESET_FAMILY_USERS.map((preset) => {
-              const isHusband = preset.familyRole === 'husband';
-              return (
-                <button
-                  key={preset.id}
-                  onClick={() => handleQuickPresetLogin(preset)}
-                  disabled={isLoading}
-                  className="flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-800/40 hover:bg-slate-800 hover:border-indigo-500/50 transition-all text-left group cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-xs ${
-                      isHusband ? 'bg-blue-600' : 'bg-rose-600'
-                    }`}>
-                      {isHusband ? 'H' : 'W'}
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-white group-hover:text-indigo-300 transition-colors">
-                        {preset.name}
-                      </div>
-                      <div className="text-[11px] text-slate-400 capitalize">
-                        {preset.familyRole} • <span className="font-mono text-[10px] text-slate-500">{preset.databaseId}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition-transform group-hover:translate-x-0.5" />
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+              <div className="text-xs font-extrabold text-indigo-400">3 Accounts</div>
+              <div className="text-[10px] text-slate-400">Cards & Loans</div>
+            </div>
+            <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+              <div className="text-xs font-extrabold text-emerald-400">3 Instructions</div>
+              <div className="text-[10px] text-slate-400">Scheduled / Month</div>
+            </div>
+            <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+              <div className="text-xs font-extrabold text-amber-400">3 AI Advice</div>
+              <div className="text-[10px] text-slate-400">Consultations / mo</div>
+            </div>
+            <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+              <div className="text-xs font-extrabold text-rose-400">5 Scans</div>
+              <div className="text-[10px] text-slate-400">Receipt Extractions</div>
+            </div>
           </div>
         </div>
 
@@ -170,17 +146,6 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
             <button
               type="button"
-              onClick={() => { setIsRegistering(false); setError(null); }}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                !isRegistering 
-                  ? 'bg-indigo-600 text-white shadow' 
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Sign In to Dedicated DB
-            </button>
-            <button
-              type="button"
               onClick={() => { setIsRegistering(true); setError(null); }}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                 isRegistering 
@@ -188,7 +153,18 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Register & Assign New DB
+              Register Free Account
+            </button>
+            <button
+              type="button"
+              onClick={() => { setIsRegistering(false); setError(null); }}
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                !isRegistering 
+                  ? 'bg-indigo-600 text-white shadow' 
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Sign In to Existing DB
             </button>
           </div>
 
@@ -199,51 +175,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             </div>
           )}
 
-          {!isRegistering ? (
-            /* Sign In Form */
-            <form onSubmit={handleSignIn} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Account Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. ammarthaqif.ar@gmail.com"
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Security Passphrase (Optional for demo)
-                </label>
-                <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                  <input
-                    type="password"
-                    defaultValue="••••••••"
-                    placeholder="Enter passphrase"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer disabled:opacity-50"
-              >
-                <Database className="w-4 h-4" />
-                <span>Access My Dedicated Database</span>
-              </button>
-            </form>
-          ) : (
+          {isRegistering ? (
             /* Registration Form */
             <form onSubmit={handleRegister} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -255,7 +187,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                     <input
                       type="text"
-                      value={name}
+                      value={name ?? ''}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="e.g. Ammar Thaqif"
                       required
@@ -271,9 +203,9 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   <div className="relative">
                     <Heart className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                     <select
-                      value={familyRole}
+                      value={familyRole ?? 'husband'}
                       onChange={(e) => setFamilyRole(e.target.value as FamilyRole)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                     >
                       <option value="husband">Husband</option>
                       <option value="wife">Wife</option>
@@ -294,9 +226,9 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                     <input
                       type="email"
-                      value={email}
+                      value={email ?? ''}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="e.g. spouse@domain.com"
+                      placeholder="e.g. yourname@domain.com"
                       required
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
                     />
@@ -309,7 +241,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   </label>
                   <input
                     type="text"
-                    value={householdName}
+                    value={householdName ?? ''}
                     onChange={(e) => setHouseholdName(e.target.value)}
                     placeholder="e.g. Thaqif Household"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
@@ -319,7 +251,23 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Initial Dedicated Database Seed
+                  Security Passphrase
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    value={passphrase ?? ''}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    placeholder="Create a personal access passphrase"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Starter Data Preset (Within Free 3-Account Limit)
                 </label>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                   <button
@@ -331,8 +279,8 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                         : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
                     }`}
                   >
-                    <div className="font-bold">Standard Portfolio</div>
-                    <div className="text-[10px] text-slate-500">Cards & Installments</div>
+                    <div className="font-bold">Cards & Loans</div>
+                    <div className="text-[10px] text-slate-500">3 pre-seeded items</div>
                   </button>
 
                   <button
@@ -344,8 +292,8 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                         : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
                     }`}
                   >
-                    <div className="font-bold">Spouse Starter</div>
-                    <div className="text-[10px] text-slate-500">E-Wallets & BNPL</div>
+                    <div className="font-bold">E-Wallets & BNPL</div>
+                    <div className="text-[10px] text-slate-500">SPayLater & Grab</div>
                   </button>
 
                   <button
@@ -358,7 +306,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     }`}
                   >
                     <div className="font-bold">Blank Slate</div>
-                    <div className="text-[10px] text-slate-500">Zero initial balance</div>
+                    <div className="text-[10px] text-slate-500">Zero entries</div>
                   </button>
                 </div>
               </div>
@@ -366,7 +314,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 text-xs flex items-center gap-2.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>
-                  A dedicated, isolated database partition (<code className="text-indigo-300 font-mono text-[10px]">db_[name]</code>) will be created and assigned automatically.
+                  A dedicated, isolated database partition (<code className="text-indigo-300 font-mono text-[10px]">db_[name]</code>) will be created with Free Tier quotas applied.
                 </span>
               </div>
 
@@ -376,7 +324,59 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer disabled:opacity-50"
               >
                 <Database className="w-4 h-4" />
-                <span>Create Account & Provision Dedicated DB</span>
+                <span>Create Free Account & Open Dedicated DB</span>
+              </button>
+            </form>
+          ) : (
+            /* Sign In Form */
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Registered Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="email"
+                    value={email ?? ''}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="e.g. yourname@domain.com"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Security Passphrase
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    value={passphrase ?? ''}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    placeholder="Enter passphrase"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 text-xs flex items-center gap-2">
+                <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span>
+                  Signing in loads your personal database partition from local storage or cloud server.
+                </span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer disabled:opacity-50"
+              >
+                <Database className="w-4 h-4" />
+                <span>Sign In to My Dedicated Database</span>
               </button>
             </form>
           )}
@@ -396,3 +396,4 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     </div>
   );
 }
+

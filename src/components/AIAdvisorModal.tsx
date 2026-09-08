@@ -11,7 +11,7 @@ import {
   TrendingDown,
   RefreshCw
 } from 'lucide-react';
-import { AIAdvisorResponse, BillAccount, PaymentStrategyType } from '../types';
+import { AIAdvisorResponse, BillAccount, PaymentStrategyType, UserProfile } from '../types';
 import { CurrencyCode, formatCurrency } from '../utils/currency';
 
 interface AIAdvisorModalProps {
@@ -21,6 +21,9 @@ interface AIAdvisorModalProps {
   strategy: PaymentStrategyType;
   liquidCash: number;
   currency?: CurrencyCode;
+  currentUser?: UserProfile | null;
+  onIncrementUsage?: () => void;
+  onUpgradeToPro?: () => void;
 }
 
 export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
@@ -30,12 +33,20 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
   strategy,
   liquidCash,
   currency = 'MYR',
+  currentUser,
+  onIncrementUsage,
+  onUpgradeToPro,
 }) => {
   const [loading, setLoading] = useState(false);
   const [advisorData, setAdvisorData] = useState<AIAdvisorResponse | null>(null);
   const [customQuestion, setCustomQuestion] = useState('');
 
   if (!isOpen) return null;
+
+  const isFreeTier = currentUser?.tier === 'free';
+  const aiUsed = currentUser?.tierLimits?.aiConsultationsUsed || 0;
+  const aiLimit = currentUser?.tierLimits?.monthlyAiConsultations || 3;
+  const isLimitReached = isFreeTier && aiUsed >= aiLimit;
 
   const quickPrompts = [
     'How do I maximize cash float until my 15th paycheck?',
@@ -45,6 +56,10 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
   ];
 
   const fetchAdvice = async (question?: string) => {
+    if (isLimitReached) {
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/gemini/advise', {
@@ -59,6 +74,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
       });
       const data = await res.json();
       setAdvisorData(data);
+      onIncrementUsage?.();
     } catch (err) {
       console.error('Failed to get advice:', err);
     } finally {
@@ -78,9 +94,15 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-white">AI Cash Flow & Payment Strategist</h3>
-                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                  Gemini 3.8 Flash
-                </span>
+                {isFreeTier ? (
+                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                    Free Quota: {aiUsed}/{aiLimit}
+                  </span>
+                ) : (
+                  <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                    Gemini 3.8 Flash • Pro
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400">Personalized algorithmic analysis across cycle dates, float windows, & installments</p>
             </div>
@@ -93,6 +115,24 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
           </button>
         </div>
 
+        {/* Limit Warning Banner */}
+        {isLimitReached && (
+          <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-300 text-xs flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Free Plan Limit: You have reached {aiLimit} AI consultations this month.</span>
+            </div>
+            {onUpgradeToPro && (
+              <button
+                onClick={onUpgradeToPro}
+                className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
+              >
+                Upgrade to Pro
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Scrollable Body */}
         <div className="space-y-4 overflow-y-auto pr-1 grow">
           {/* Action Trigger Banner */}
@@ -101,12 +141,13 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
               <Bot className="w-10 h-10 text-indigo-400 mx-auto" />
               <h4 className="font-bold text-sm text-white">Synthesize Live Financial Optimization</h4>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Gemini analyzes your {accounts.length} linked accounts ($ {liquidCash.toFixed(2)} liquid cash) to formulate an airtight, zero-late-fee payment game plan.
+                Gemini analyzes your {accounts.length} linked accounts ({formatCurrency(liquidCash, currency)} liquid cash) to formulate an airtight, zero-late-fee payment game plan.
               </p>
               <button
                 id="btn-run-ai-analysis"
                 onClick={() => fetchAdvice()}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 transition-all cursor-pointer"
+                disabled={isLimitReached}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 transition-all cursor-pointer disabled:opacity-50"
               >
                 Run AI Strategy Synthesis
               </button>
@@ -135,7 +176,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
                     AI Strategic Executive Summary
                   </span>
                   <span className="text-emerald-400 font-bold text-[11px] bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                    {advisorData.savingsEstimated || 'Saved $120+ in Penalties'}
+                    {advisorData.savingsEstimated || 'Saved in Penalties'}
                   </span>
                 </div>
                 <p className="text-slate-200 text-xs leading-relaxed">{advisorData.executiveSummary}</p>
@@ -205,7 +246,8 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
               <div className="pt-2 flex justify-end">
                 <button
                   onClick={() => fetchAdvice()}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium cursor-pointer"
+                  disabled={isLimitReached}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>Refresh AI Analysis</span>
@@ -225,7 +267,8 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
                   setCustomQuestion(q);
                   fetchAdvice(q);
                 }}
-                className="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
+                disabled={isLimitReached}
+                className="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {q}
               </button>
@@ -236,16 +279,17 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
             <input
               type="text"
               placeholder="Ask custom question about your bills, paychecks, or grace float..."
-              value={customQuestion}
+              value={customQuestion ?? ''}
               onChange={(e) => setCustomQuestion(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') fetchAdvice();
               }}
-              className="grow bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs"
+              disabled={isLimitReached}
+              className="grow bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs disabled:opacity-50"
             />
             <button
               onClick={() => fetchAdvice()}
-              disabled={loading}
+              disabled={loading || isLimitReached}
               className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors cursor-pointer disabled:opacity-50"
             >
               <Send className="w-4 h-4" />

@@ -211,7 +211,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
             </div>
             {/* Category Dropdown */}
             <select
-              value={selectedCategory}
+              value={selectedCategory ?? 'all'}
               onChange={(e) => setSelectedCategory(e.target.value)}
               className="text-xs bg-slate-800 text-slate-300 rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none focus:border-purple-500"
             >
@@ -323,7 +323,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                   type="text"
                   required
                   placeholder="e.g., Sony WH-1000XM5 Headphones"
-                  value={title}
+                  value={title ?? ''}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 text-xs"
                 />
@@ -333,7 +333,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Card or E-Wallet</label>
                   <select
-                    value={accountId}
+                    value={accountId ?? ''}
                     onChange={(e) => setAccountId(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-white focus:outline-none focus:border-purple-500 text-xs"
                   >
@@ -348,7 +348,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Category</label>
                   <select
-                    value={category}
+                    value={category ?? 'Electronics'}
                     onChange={(e) => setCategory(e.target.value as any)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-white focus:outline-none focus:border-purple-500 text-xs"
                   >
@@ -371,7 +371,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                     min="1"
                     step="10"
                     required
-                    value={totalAmount}
+                    value={totalAmount ?? 0}
                     onChange={(e) => setTotalAmount(Number(e.target.value))}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-xs font-semibold"
                   />
@@ -384,7 +384,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                     min="2"
                     max="60"
                     required
-                    value={totalTenure}
+                    value={totalTenure ?? 1}
                     onChange={(e) => {
                       const val = Number(e.target.value);
                       setTotalTenure(val);
@@ -401,7 +401,7 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                     min="1"
                     max={totalTenure}
                     required
-                    value={remainingTenure}
+                    value={remainingTenure ?? 1}
                     onChange={(e) => setRemainingTenure(Number(e.target.value))}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-xs"
                   />

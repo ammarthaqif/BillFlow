@@ -16,7 +16,7 @@ import {
   CreditCard
 } from 'lucide-react';
 import { UserProfile, UserDedicatedDatabase, FamilySyncPackage } from '../types';
-import { UserDatabaseService, PRESET_FAMILY_USERS } from '../services/userDatabaseService';
+import { UserDatabaseService } from '../services/userDatabaseService';
 
 interface FamilySyncModalProps {
   isOpen: boolean;

@@ -21,6 +21,7 @@ interface NavbarProps {
   onOpenConnectBank: () => void;
   onOpenAIAdvisor: () => void;
   onOpenFamilySync: () => void;
+  onRecordExpense?: () => void;
   onLogout: () => void;
   onSyncAll: () => void;
   isSyncing: boolean;
@@ -36,6 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenConnectBank,
   onOpenAIAdvisor,
   onOpenFamilySync,
+  onRecordExpense,
   onLogout,
   onSyncAll,
   isSyncing,
@@ -96,6 +98,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
               <span>AI Strategist</span>
             </button>
+
+            {/* Record Bill / Expense Quick Action */}
+            {onRecordExpense && (
+              <button
+                id="btn-quick-record-expense"
+                onClick={onRecordExpense}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Record Bill</span>
+                <span className="sm:hidden">Bill</span>
+              </button>
+            )}
 
             {/* Connect Bank Button */}
             <button

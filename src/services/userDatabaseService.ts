@@ -5,92 +5,15 @@ import {
   BillAccount, 
   InstallmentPlan, 
   UserSettings, 
-  FamilyRole 
+  FamilyRole,
+  ExpenseItem,
+  StandingInstruction 
 } from '../types';
-import { INITIAL_ACCOUNTS, INITIAL_INSTALLMENTS, INITIAL_SETTINGS } from '../data/seedData';
+import { INITIAL_ACCOUNTS, INITIAL_INSTALLMENTS, INITIAL_SETTINGS, INITIAL_EXPENSES, INITIAL_STANDING_INSTRUCTIONS } from '../data/seedData';
 
 const USERS_INDEX_KEY = 'billflow_registered_users';
 const ACTIVE_USER_KEY = 'billflow_active_user_id';
 const DB_PREFIX = 'billflow_user_db_';
-
-// Default pre-configured family profiles for husband & wife
-export const PRESET_FAMILY_USERS: UserProfile[] = [
-  {
-    id: 'usr_ammar_01',
-    name: 'Ammar Thaqif',
-    email: 'ammarthaqif.ar@gmail.com',
-    familyRole: 'husband',
-    householdName: 'Thaqif Household',
-    createdAt: '2026-09-01T08:00:00.000Z',
-    databaseId: 'db_ammar_thaqif',
-  },
-  {
-    id: 'usr_sarah_02',
-    name: 'Sarah Thaqif',
-    email: 'sarah.thaqif@gmail.com',
-    familyRole: 'wife',
-    householdName: 'Thaqif Household',
-    createdAt: '2026-09-01T08:00:00.000Z',
-    databaseId: 'db_sarah_thaqif',
-  },
-];
-
-// Helper: Seed initial database for Husband
-function getInitialHusbandDatabase(): UserDedicatedDatabase {
-  return {
-    databaseId: 'db_ammar_thaqif',
-    userId: 'usr_ammar_01',
-    userEmail: 'ammarthaqif.ar@gmail.com',
-    lastUpdated: new Date().toISOString(),
-    version: 1,
-    accounts: INITIAL_ACCOUNTS.slice(0, 3).map((a) => ({
-      ...a,
-      ownerName: 'Ammar (Husband)',
-      ownerRole: 'husband',
-    })),
-    installments: INITIAL_INSTALLMENTS.slice(0, 2).map((i) => ({
-      ...i,
-      ownerName: 'Ammar (Husband)',
-      ownerRole: 'husband',
-    })),
-    settings: {
-      ...INITIAL_SETTINGS,
-      allocatedCashForBills: 3800,
-    },
-    paidScheduleIds: [],
-    scheduledScheduleIds: [],
-    alertThresholds: [7, 3, 1],
-  };
-}
-
-// Helper: Seed initial database for Wife
-function getInitialWifeDatabase(): UserDedicatedDatabase {
-  return {
-    databaseId: 'db_sarah_thaqif',
-    userId: 'usr_sarah_02',
-    userEmail: 'sarah.thaqif@gmail.com',
-    lastUpdated: new Date().toISOString(),
-    version: 1,
-    accounts: INITIAL_ACCOUNTS.slice(2).map((a) => ({
-      ...a,
-      ownerName: 'Sarah (Wife)',
-      ownerRole: 'wife',
-    })),
-    installments: INITIAL_INSTALLMENTS.slice(2).map((i) => ({
-      ...i,
-      ownerName: 'Sarah (Wife)',
-      ownerRole: 'wife',
-    })),
-    settings: {
-      ...INITIAL_SETTINGS,
-      monthlyIncome: 5500,
-      allocatedCashForBills: 2600,
-    },
-    paidScheduleIds: [],
-    scheduledScheduleIds: [],
-    alertThresholds: [5, 2, 1],
-  };
-}
 
 export class UserDatabaseService {
   /**
@@ -102,19 +25,92 @@ export class UserDatabaseService {
       if (raw) {
         return JSON.parse(raw);
       }
-      // Initialize with preset family profiles
-      localStorage.setItem(USERS_INDEX_KEY, JSON.stringify(PRESET_FAMILY_USERS));
-      // Seed dedicated databases for both
-      if (!localStorage.getItem(`${DB_PREFIX}usr_ammar_01`)) {
-        localStorage.setItem(`${DB_PREFIX}usr_ammar_01`, JSON.stringify(getInitialHusbandDatabase()));
-      }
-      if (!localStorage.getItem(`${DB_PREFIX}usr_sarah_02`)) {
-        localStorage.setItem(`${DB_PREFIX}usr_sarah_02`, JSON.stringify(getInitialWifeDatabase()));
-      }
-      return PRESET_FAMILY_USERS;
+      return [];
     } catch {
-      return PRESET_FAMILY_USERS;
+      return [];
     }
+  }
+
+  /**
+   * Update and persist a user's profile
+   */
+  static updateUserProfile(user: UserProfile): void {
+    const users = this.getRegisteredUsers();
+    const idx = users.findIndex((u) => u.id === user.id);
+    if (idx !== -1) {
+      users[idx] = user;
+    } else {
+      users.push(user);
+    }
+    localStorage.setItem(USERS_INDEX_KEY, JSON.stringify(users));
+  }
+
+  /**
+   * Increment AI consultation usage count for user
+   */
+  static incrementAiUsage(userId: string): UserProfile | null {
+    const users = this.getRegisteredUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) return null;
+    if (!user.tierLimits) {
+      user.tierLimits = {
+        maxAccounts: 3,
+        maxStandingInstructions: 3,
+        monthlyAiConsultations: 3,
+        monthlyReceiptExtractions: 5,
+        aiConsultationsUsed: 0,
+        receiptExtractionsUsed: 0,
+      };
+    }
+    user.tierLimits.aiConsultationsUsed = (user.tierLimits.aiConsultationsUsed || 0) + 1;
+    this.updateUserProfile(user);
+    return user;
+  }
+
+  static incrementAiConsultationUsage(userId: string): UserProfile | null {
+    return this.incrementAiUsage(userId);
+  }
+
+  /**
+   * Increment receipt scanning/extraction usage count for user
+   */
+  static incrementReceiptUsage(userId: string): UserProfile | null {
+    const users = this.getRegisteredUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) return null;
+    if (!user.tierLimits) {
+      user.tierLimits = {
+        maxAccounts: 3,
+        maxStandingInstructions: 3,
+        monthlyAiConsultations: 3,
+        monthlyReceiptExtractions: 5,
+        aiConsultationsUsed: 0,
+        receiptExtractionsUsed: 0,
+      };
+    }
+    user.tierLimits.receiptExtractionsUsed = (user.tierLimits.receiptExtractionsUsed || 0) + 1;
+    this.updateUserProfile(user);
+    return user;
+  }
+
+  /**
+   * Upgrade user to Pro Tier (unlimited features)
+   */
+  static upgradeToPro(userId: string): UserProfile | null {
+    const users = this.getRegisteredUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) return null;
+    user.tier = 'pro';
+    user.tierLimits = {
+      maxAccounts: 999,
+      maxStandingInstructions: 999,
+      monthlyAiConsultations: 999,
+      monthlyReceiptExtractions: 999,
+      aiConsultationsUsed: user.tierLimits?.aiConsultationsUsed || 0,
+      receiptExtractionsUsed: user.tierLimits?.receiptExtractionsUsed || 0,
+    };
+    this.updateUserProfile(user);
+    return user;
   }
 
   /**
@@ -179,38 +175,64 @@ export class UserDatabaseService {
       householdName: params.householdName?.trim() || 'My Family',
       createdAt: new Date().toISOString(),
       databaseId,
+      tier: 'free',
+      tierLimits: {
+        maxAccounts: 3,
+        maxStandingInstructions: 3,
+        monthlyAiConsultations: 3,
+        monthlyReceiptExtractions: 5,
+        aiConsultationsUsed: 0,
+        receiptExtractionsUsed: 0,
+      },
     };
 
     // Construct dedicated database
     let initialAccounts: BillAccount[] = [];
     let initialInstallments: InstallmentPlan[] = [];
+    let initialExpenses: ExpenseItem[] = [];
+    let initialStandingInstructions: StandingInstruction[] = [];
 
     if (params.initialDataTemplate === 'wife_starter') {
-      initialAccounts = INITIAL_ACCOUNTS.slice(2).map((a) => ({
+      initialAccounts = INITIAL_ACCOUNTS.slice(2, 5).map((a) => ({
         ...a,
         id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
       }));
-      initialInstallments = INITIAL_INSTALLMENTS.slice(2).map((i) => ({
+      initialInstallments = INITIAL_INSTALLMENTS.slice(1, 3).map((i) => ({
         ...i,
         id: `inst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
       }));
+      initialExpenses = INITIAL_EXPENSES.filter((e) => e.ownerRole !== 'husband').slice(0, 5).map((e) => ({
+        ...e,
+        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${newUser.name} (${newUser.familyRole})`,
+        ownerRole: newUser.familyRole,
+      }));
+      initialStandingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(1, 3);
     } else if (params.initialDataTemplate !== 'blank') {
-      initialAccounts = INITIAL_ACCOUNTS.map((a) => ({
+      // Free plan starter: 3 accounts (at limit), 2 installments, 5 expenses, 2 standing instructions
+      initialAccounts = INITIAL_ACCOUNTS.slice(0, 3).map((a) => ({
         ...a,
         id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
       }));
-      initialInstallments = INITIAL_INSTALLMENTS.map((i) => ({
+      initialInstallments = INITIAL_INSTALLMENTS.slice(0, 2).map((i) => ({
         ...i,
         id: `inst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
       }));
+      initialExpenses = INITIAL_EXPENSES.slice(0, 6).map((e) => ({
+        ...e,
+        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${newUser.name} (${newUser.familyRole})`,
+        ownerRole: newUser.familyRole,
+      }));
+      initialStandingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
     }
 
     const newDb: UserDedicatedDatabase = {
@@ -221,6 +243,8 @@ export class UserDatabaseService {
       version: 1,
       accounts: initialAccounts,
       installments: initialInstallments,
+      expenses: initialExpenses,
+      standingInstructions: initialStandingInstructions,
       settings: { ...INITIAL_SETTINGS },
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -250,9 +274,16 @@ export class UserDatabaseService {
     const raw = localStorage.getItem(`${DB_PREFIX}${userId}`);
     if (raw) {
       try {
-        const parsed = JSON.parse(raw);
+        const parsed: UserDedicatedDatabase = JSON.parse(raw);
         if (parsed && parsed.settings) {
           parsed.settings.currency = parsed.settings.currency || 'MYR';
+        }
+        // Migration: ensure accounts have valid defaults and expenses/standing instructions array are present
+        if (!parsed.expenses || parsed.expenses.length === 0) {
+          parsed.expenses = INITIAL_EXPENSES.slice(0, 6);
+        }
+        if (!parsed.standingInstructions) {
+          parsed.standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
         }
         return parsed;
       } catch (err) {
@@ -271,8 +302,10 @@ export class UserDatabaseService {
       userEmail: user?.email || '',
       lastUpdated: new Date().toISOString(),
       version: 1,
-      accounts: INITIAL_ACCOUNTS,
-      installments: INITIAL_INSTALLMENTS,
+      accounts: INITIAL_ACCOUNTS.slice(0, 3),
+      installments: INITIAL_INSTALLMENTS.slice(0, 2),
+      expenses: INITIAL_EXPENSES.slice(0, 6),
+      standingInstructions: INITIAL_STANDING_INSTRUCTIONS.slice(0, 2),
       settings: INITIAL_SETTINGS,
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -322,10 +355,12 @@ export class UserDatabaseService {
       includeAccounts: boolean;
       includeInstallments: boolean;
       includeSettings: boolean;
+      includeExpenses?: boolean;
     }
   ): FamilySyncPackage {
     const selectedAccounts = includeOptions.includeAccounts ? db.accounts : [];
     const selectedInstallments = includeOptions.includeInstallments ? db.installments : [];
+    const selectedExpenses = includeOptions.includeExpenses !== false ? (db.expenses || []) : [];
 
     const totalDebt = selectedAccounts.reduce((sum, a) => sum + a.statementBalance, 0);
     const totalMonthlyInstallments = selectedInstallments.reduce((sum, i) => sum + i.monthlyAmount, 0);
@@ -347,11 +382,13 @@ export class UserDatabaseService {
       data: {
         accounts: selectedAccounts,
         installments: selectedInstallments,
+        expenses: selectedExpenses,
         settings: includeOptions.includeSettings ? db.settings : undefined,
       },
       summary: {
         totalAccounts: selectedAccounts.length,
         totalInstallments: selectedInstallments.length,
+        totalExpenses: selectedExpenses.length,
         totalDebt: Math.round(totalDebt * 100) / 100,
         totalMonthlyInstallments: Math.round(totalMonthlyInstallments * 100) / 100,
       },
@@ -369,7 +406,7 @@ export class UserDatabaseService {
       tagWithOwner: boolean;
       customOwnerTag?: string;
     }
-  ): { updatedDb: UserDedicatedDatabase; accountsAdded: number; installmentsAdded: number } {
+  ): { updatedDb: UserDedicatedDatabase; accountsAdded: number; installmentsAdded: number; expensesAdded?: number } {
     if (syncPackage.format !== 'billflow-family-sync') {
       throw new Error('Invalid file format. Please upload a valid BillFlow Family Sync file.');
     }
@@ -392,12 +429,17 @@ export class UserDatabaseService {
           ...i,
           ownerName: options.tagWithOwner ? i.ownerName || ownerLabel : i.ownerName,
         })),
+        expenses: (syncPackage.data.expenses || []).map((e) => ({
+          ...e,
+          ownerName: options.tagWithOwner ? e.ownerName || ownerLabel : e.ownerName,
+        })),
       };
       this.saveUserDatabase(updatedDb);
       return {
         updatedDb,
         accountsAdded: updatedDb.accounts.length,
         installmentsAdded: updatedDb.installments.length,
+        expensesAdded: (updatedDb.expenses || []).length,
       };
     }
 
@@ -407,7 +449,6 @@ export class UserDatabaseService {
 
     for (const incomingAcc of syncPackage.data.accounts) {
       if (existingAccountIds.has(incomingAcc.id)) {
-        // Create cloned ID with partner prefix to avoid collisions
         newAccounts.push({
           ...incomingAcc,
           id: `sync-${partnerRole}-${incomingAcc.id}-${Date.now().toString(36)}`,
@@ -444,12 +485,34 @@ export class UserDatabaseService {
       }
     }
 
+    // Merge expenses
+    const existingExpIds = new Set((currentDb.expenses || []).map((e) => e.id));
+    const newExpenses: ExpenseItem[] = [];
+
+    for (const incomingExp of (syncPackage.data.expenses || [])) {
+      if (existingExpIds.has(incomingExp.id)) {
+        newExpenses.push({
+          ...incomingExp,
+          id: `sync-exp-${partnerRole}-${incomingExp.id}-${Date.now().toString(36)}`,
+          ownerName: options.tagWithOwner ? incomingExp.ownerName || ownerLabel : incomingExp.ownerName,
+          ownerRole: partnerRole,
+        });
+      } else {
+        newExpenses.push({
+          ...incomingExp,
+          ownerName: options.tagWithOwner ? incomingExp.ownerName || ownerLabel : incomingExp.ownerName,
+          ownerRole: partnerRole,
+        });
+      }
+    }
+
     const updatedDb: UserDedicatedDatabase = {
       ...currentDb,
       lastUpdated: new Date().toISOString(),
       version: currentDb.version + 1,
       accounts: [...currentDb.accounts, ...newAccounts],
       installments: [...currentDb.installments, ...newInstallments],
+      expenses: [...(currentDb.expenses || []), ...newExpenses],
     };
 
     this.saveUserDatabase(updatedDb);
@@ -458,6 +521,7 @@ export class UserDatabaseService {
       updatedDb,
       accountsAdded: newAccounts.length,
       installmentsAdded: newInstallments.length,
+      expensesAdded: newExpenses.length,
     };
   }
 }

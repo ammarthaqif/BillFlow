@@ -231,7 +231,7 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
                 type="number"
                 min="0"
                 step="50"
-                value={allocatedCash}
+                value={allocatedCash ?? 0}
                 onChange={(e) => handleCashChange(Math.max(0, Number(e.target.value)))}
                 className="w-36 pl-9 pr-3 py-1.5 text-right font-bold text-white bg-slate-900 rounded-lg border border-slate-700 focus:outline-none focus:border-indigo-500 text-sm"
               />
@@ -259,7 +259,7 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
           min="0"
           max={Math.max(effectiveStatementDue * 1.2, 5000)}
           step="50"
-          value={allocatedCash}
+          value={allocatedCash ?? 0}
           onChange={(e) => handleCashChange(Number(e.target.value))}
           className="w-full accent-indigo-500 cursor-pointer h-2 bg-slate-700 rounded-lg"
         />
