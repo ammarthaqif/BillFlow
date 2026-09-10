@@ -1,4 +1,4 @@
-import { BillAccount, InstallmentPlan, UserSettings, ExpenseItem, StandingInstruction } from '../types';
+import { BillAccount, InstallmentPlan, UserSettings, ExpenseItem, StandingInstruction, BankScheduledTransaction } from '../types';
 
 export const INITIAL_ACCOUNTS: BillAccount[] = [
   {
@@ -271,6 +271,8 @@ export const INITIAL_SETTINGS: UserSettings = {
   monthlyIncome: 6500.0,
   paycheckSchedule: 'bi_monthly',
   paycheckDates: [1, 15],
+  primaryBankAccountId: 'acc-9',
+  safetyBufferAmount: 300.0,
   allocatedCashForBills: 3500.0,
   alertDaysBeforeDue: [7, 3, 1],
   defaultStrategy: 'grace_float',
@@ -568,6 +570,43 @@ export const INITIAL_STANDING_INSTRUCTIONS: StandingInstruction[] = [
     nextExecutionDate: '2026-10-15',
     referenceNumber: 'TM-ACC-1099238',
     notes: 'Standing auto-debit charge on credit card for fiber broadband',
+    ownerName: 'Ammar (Husband)',
+    ownerRole: 'husband',
+  },
+];
+
+export const INITIAL_BANK_SCHEDULED_TRANSACTIONS: BankScheduledTransaction[] = [
+  {
+    id: 'btx-1',
+    sourceBankAccountId: 'acc-9',
+    sourceBankAccountName: 'Maybank Premier Savings',
+    targetAccountId: 'acc-3',
+    targetAccountName: 'SPayLater (Shopee)',
+    type: 'settlement_bnpl',
+    title: 'Pre-Due Settlement: SPayLater Oct Statement',
+    amount: 320.0,
+    scheduledDate: '2026-10-08',
+    status: 'pending',
+    notes: 'Scheduled 2 days before due date (Oct 10) to secure 0% interest and preserve cash float',
+    referenceNumber: 'BNPL-SETTLE-9921',
+    createdAt: '2026-09-28T09:30:00Z',
+    ownerName: 'Sarah (Wife)',
+    ownerRole: 'wife',
+  },
+  {
+    id: 'btx-2',
+    sourceBankAccountId: 'acc-9',
+    sourceBankAccountName: 'Maybank Premier Savings',
+    targetAccountId: 'acc-1',
+    targetAccountName: 'Sapphire Preferred',
+    type: 'settlement_credit_card',
+    title: 'Full Statement Settlement: Chase Sapphire',
+    amount: 1850.0,
+    scheduledDate: '2026-10-05',
+    status: 'pending',
+    notes: 'Auto-clearing FPX transfer scheduled 2 days before Oct 7 due date',
+    referenceNumber: 'CC-SETTLE-7712',
+    createdAt: '2026-09-29T14:15:00Z',
     ownerName: 'Ammar (Husband)',
     ownerRole: 'husband',
   },

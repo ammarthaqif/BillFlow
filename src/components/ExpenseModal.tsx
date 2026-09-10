@@ -65,7 +65,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   onClose,
   onSaveExpense,
   editingExpense,
-  accounts,
+  accounts = [],
   currency = 'MYR',
 }) => {
   const currencyConfig = getCurrencyConfig(currency);
@@ -93,10 +93,10 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const [settledFromAccountId, setSettledFromAccountId] = useState('');
 
   // Separate accounts by mode
-  const creditCardAccounts = accounts.filter((a) => a.type === 'credit_card');
-  const bnplAccounts = accounts.filter((a) => a.type === 'ewallet_pay_later');
-  const bankAccounts = accounts.filter((a) => a.type === 'bank_account');
-  const loanAccounts = accounts.filter((a) => ['personal_loan', 'housing_loan', 'automotive_loan', 'other_loan'].includes(a.type));
+  const creditCardAccounts = (accounts || []).filter((a) => a.type === 'credit_card');
+  const bnplAccounts = (accounts || []).filter((a) => a.type === 'ewallet_pay_later');
+  const bankAccounts = (accounts || []).filter((a) => a.type === 'bank_account');
+  const loanAccounts = (accounts || []).filter((a) => ['personal_loan', 'housing_loan', 'automotive_loan', 'other_loan'].includes(a.type));
 
   // Initialize or prefill state
   useEffect(() => {

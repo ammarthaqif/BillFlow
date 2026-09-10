@@ -140,9 +140,74 @@ export interface UserSettings {
   monthlyIncome: number;
   paycheckSchedule: 'monthly' | 'bi_monthly' | 'weekly';
   paycheckDates: number[]; // e.g. [1, 15] or [28]
+  primaryBankAccountId?: string; // Linked bank account ID receiving paycheck
+  safetyBufferAmount?: number; // Minimum liquid safety buffer e.g. RM 300
   allocatedCashForBills: number;
   alertDaysBeforeDue: number[]; // [7, 3, 1]
   defaultStrategy: PaymentStrategyType;
+}
+
+export type BankTransactionType = 
+  | 'settlement_credit_card' 
+  | 'settlement_bnpl' 
+  | 'standing_instruction_debit' 
+  | 'scheduled_transfer' 
+  | 'paycheck_deposit'
+  | 'custom_scheduled_debit';
+
+export interface BankScheduledTransaction {
+  id: string;
+  sourceBankAccountId: string; // Linked bank account ID
+  sourceBankAccountName: string;
+  targetAccountId?: string; // Target Card / BNPL account ID or payee
+  targetAccountName?: string;
+  type: BankTransactionType;
+  title: string;
+  amount: number;
+  scheduledDate: string; // YYYY-MM-DD
+  status: 'pending' | 'executed' | 'cancelled';
+  notes?: string;
+  referenceNumber?: string;
+  createdAt: string;
+  executedAt?: string;
+  ownerName?: string;
+  ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
+}
+
+export interface BankSettlementAdvice {
+  targetAccount: BillAccount;
+  bankAccount: BillAccount;
+  statementBalance: number;
+  minPayment: number;
+  selectedAmountToSettle: number;
+  targetDueDate: string;
+  targetSettlementDate: string;
+  daysPriorToDueDate: number;
+  currentBankBalance: number;
+  incomingPaychecksAmount: number;
+  incomingPaychecksCount: number;
+  committedOutflowsAmount: number;
+  committedOutflowsCount: number;
+  projectedAvailableBeforeSettlement: number;
+  requiredBankBalanceToday: number;
+  requiredSafeBalanceWithBuffer: number;
+  safetyBufferAmount: number;
+  netPosition: number; // currentBankBalance - requiredBankBalanceToday
+  status: 'sufficient' | 'shortfall' | 'tight_buffer';
+  shortfallAmount: number;
+  postSettlementRemainingBuffer: number;
+  timeline: Array<{
+    date: string;
+    title: string;
+    type: 'current_balance' | 'paycheck_inflow' | 'committed_outflow' | 'target_settlement';
+    amount: number;
+    runningBalance: number;
+    description: string;
+  }>;
+  recommendations: Array<{
+    type: 'positive' | 'warning' | 'tip' | 'action';
+    text: string;
+  }>;
 }
 
 export interface CustomAlert {
@@ -198,6 +263,19 @@ export interface UserTierLimits {
   receiptExtractionsUsed: number;
 }
 
+export interface ProPaymentRecord {
+  transactionId: string;
+  invoiceNumber: string;
+  plan: 'monthly' | 'annual';
+  amount: number;
+  currency: string;
+  paymentMethod: 'card' | 'fpx' | 'ewallet';
+  paymentMethodDetails?: string;
+  paidAt: string;
+  nextBillingDate: string;
+  status: 'active' | 'cancelled' | 'refunded';
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -208,6 +286,7 @@ export interface UserProfile {
   databaseId: string;
   tier: UserTier;
   tierLimits?: UserTierLimits;
+  proPaymentRecord?: ProPaymentRecord;
 }
 
 export type StandingInstructionFrequency = 'monthly' | 'weekly' | 'bi_weekly' | 'quarterly' | 'yearly';
@@ -264,6 +343,7 @@ export interface UserDedicatedDatabase {
   installments: InstallmentPlan[];
   expenses?: ExpenseItem[];
   standingInstructions?: StandingInstruction[];
+  bankScheduledTransactions?: BankScheduledTransaction[];
   settings: UserSettings;
   paidScheduleIds: string[];
   scheduledScheduleIds: string[];

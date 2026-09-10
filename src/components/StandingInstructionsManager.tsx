@@ -43,8 +43,8 @@ interface StandingInstructionsManagerProps {
 }
 
 export function StandingInstructionsManager({
-  standingInstructions,
-  accounts,
+  standingInstructions = [],
+  accounts = [],
   currentUser,
   activeCurrency,
   currency,

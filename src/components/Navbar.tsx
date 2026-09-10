@@ -6,7 +6,8 @@ import {
   CreditCard,
   Database,
   ArrowRightLeft,
-  LogOut
+  LogOut,
+  Landmark
 } from 'lucide-react';
 import { CustomAlert, UserProfile } from '../types';
 import { CurrencyCode } from '../utils/currency';
@@ -21,6 +22,7 @@ interface NavbarProps {
   onOpenConnectBank: () => void;
   onOpenAIAdvisor: () => void;
   onOpenFamilySync: () => void;
+  onOpenBankAdvisor?: () => void;
   onRecordExpense?: () => void;
   onLogout: () => void;
   onSyncAll: () => void;
@@ -37,12 +39,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenConnectBank,
   onOpenAIAdvisor,
   onOpenFamilySync,
+  onOpenBankAdvisor,
   onRecordExpense,
   onLogout,
   onSyncAll,
   isSyncing,
 }) => {
-  const unreadAlerts = alerts.filter((a) => !a.read);
+  const unreadAlerts = (alerts || []).filter((a) => !a.read);
   const urgentCount = unreadAlerts.filter((a) => a.severity === 'urgent').length;
   const isHusband = currentUser.familyRole === 'husband';
 
@@ -98,6 +101,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
               <span>AI Strategist</span>
             </button>
+
+            {/* Bank Settlement Advisor Button */}
+            {onOpenBankAdvisor && (
+              <button
+                id="btn-open-bank-advisor"
+                onClick={onOpenBankAdvisor}
+                className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-500/40 shadow-sm transition-all cursor-pointer"
+                title="Calculate bank balance required to settle statements prior to due date"
+              >
+                <Landmark className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Bank Advisor</span>
+              </button>
+            )}
 
             {/* Record Bill / Expense Quick Action */}
             {onRecordExpense && (

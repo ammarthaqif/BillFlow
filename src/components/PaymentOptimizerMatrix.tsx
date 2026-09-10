@@ -13,7 +13,8 @@ import {
   Layers,
   Zap,
   TrendingDown,
-  Check
+  Check,
+  Landmark
 } from 'lucide-react';
 import { BillAccount, PaymentScheduleItem, PaymentStrategyType } from '../types';
 import { formatDate } from '../utils/paymentOptimizer';
@@ -34,6 +35,7 @@ interface PaymentOptimizerMatrixProps {
   paidScheduleIds: Set<string>;
   scheduledScheduleIds: Set<string>;
   onOpenAIAdvisor?: () => void;
+  onAdviseSettlement?: (accountId: string) => void;
   currency?: CurrencyCode;
 }
 
@@ -52,6 +54,7 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
   paidScheduleIds,
   scheduledScheduleIds,
   onOpenAIAdvisor,
+  onAdviseSettlement,
   currency = 'MYR',
 }) => {
   const [showExplanation, setShowExplanation] = useState(false);
@@ -390,8 +393,20 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
                       </div>
                     </div>
 
-                    {/* Status Toggle Buttons */}
+                    {/* Status Toggle Buttons & Bank Liquidity Advisor */}
                     <div className="flex items-center gap-2">
+                      {onAdviseSettlement && (
+                        <button
+                          type="button"
+                          onClick={() => onAdviseSettlement(item.accountId)}
+                          className="px-2.5 py-2 text-xs font-semibold rounded-lg bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 transition-all cursor-pointer"
+                          title="Calculate bank balance required to settle this statement prior to due date"
+                        >
+                          <Landmark className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="hidden sm:inline">Bank Advisor</span>
+                        </button>
+                      )}
+
                       <button
                         onClick={() => onToggleStatus(item.id)}
                         className={`px-3.5 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${

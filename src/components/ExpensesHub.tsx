@@ -78,8 +78,8 @@ interface ExpensesHubProps {
 }
 
 export const ExpensesHub: React.FC<ExpensesHubProps> = ({
-  expenses,
-  accounts,
+  expenses = [],
+  accounts = [],
   currency,
   onAddExpense,
   onUpdateExpense,
@@ -116,7 +116,7 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
     let splitPlansCount = 0;
     let totalMonthlySplitCommitment = 0;
 
-    expenses.forEach((e) => {
+    (expenses || []).forEach((e) => {
       totalPurchases += e.amount;
       if (e.status === 'settled') {
         settledAmount += e.amount;
@@ -145,7 +145,7 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
 
   // Filtered expenses list
   const filteredExpenses = useMemo(() => {
-    return expenses.filter((e) => {
+    return (expenses || []).filter((e) => {
       // Search
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();

@@ -9,14 +9,17 @@ import {
   UserDedicatedDatabase,
   ExpenseItem,
   SettlementMethod,
-  StandingInstruction
+  StandingInstruction,
+  BankScheduledTransaction,
+  ProPaymentRecord
 } from './types';
 import { 
   INITIAL_ACCOUNTS, 
   INITIAL_INSTALLMENTS, 
   INITIAL_SETTINGS,
   INITIAL_EXPENSES,
-  INITIAL_STANDING_INSTRUCTIONS
+  INITIAL_STANDING_INSTRUCTIONS,
+  INITIAL_BANK_SCHEDULED_TRANSACTIONS
 } from './data/seedData';
 import { 
   calculatePaymentSchedule, 
@@ -42,6 +45,8 @@ import { ExpensesHub } from './components/ExpensesHub';
 import { StandingInstructionsManager } from './components/StandingInstructionsManager';
 import { ReceiptCaptureModal } from './components/ReceiptCaptureModal';
 import { UpgradeToProModal } from './components/UpgradeToProModal';
+import { IncomeSettingsModal } from './components/IncomeSettingsModal';
+import { BankSettlementAdvisorModal } from './components/BankSettlementAdvisorModal';
 
 import { 
   Sliders, 
@@ -60,7 +65,8 @@ import {
   Receipt,
   Zap,
   CalendarClock,
-  Crown
+  Crown,
+  Landmark
 } from 'lucide-react';
 
 export default function App() {
@@ -80,6 +86,8 @@ export default function App() {
   const [expenses, setExpenses] = useState<ExpenseItem[]>(INITIAL_EXPENSES);
   // State: Standing Instructions & Scheduled Payments
   const [standingInstructions, setStandingInstructions] = useState<StandingInstruction[]>(INITIAL_STANDING_INSTRUCTIONS);
+  // State: Bank Scheduled Transactions
+  const [bankScheduledTransactions, setBankScheduledTransactions] = useState<BankScheduledTransaction[]>(INITIAL_BANK_SCHEDULED_TRANSACTIONS);
   // State: User settings
   const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
@@ -105,6 +113,9 @@ export default function App() {
   const [isReceiptCaptureOpen, setIsReceiptCaptureOpen] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState<string>('');
+  const [isIncomeSettingsOpen, setIsIncomeSettingsOpen] = useState(false);
+  const [isBankAdvisorOpen, setIsBankAdvisorOpen] = useState(false);
+  const [advisorTargetAccountId, setAdvisorTargetAccountId] = useState<string | undefined>(undefined);
 
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
@@ -119,6 +130,11 @@ export default function App() {
       setInstallments(db.installments || []);
       setExpenses(db.expenses && db.expenses.length > 0 ? db.expenses : INITIAL_EXPENSES);
       setStandingInstructions(db.standingInstructions && db.standingInstructions.length > 0 ? db.standingInstructions : INITIAL_STANDING_INSTRUCTIONS);
+      setBankScheduledTransactions(
+        db.bankScheduledTransactions && db.bankScheduledTransactions.length > 0
+          ? db.bankScheduledTransactions
+          : INITIAL_BANK_SCHEDULED_TRANSACTIONS
+      );
       if (db.settings) {
         setSettings(db.settings);
         setAllocatedCash(db.settings.allocatedCashForBills || 3500);
@@ -148,7 +164,8 @@ export default function App() {
     updatedPaid: Set<string>,
     updatedScheduled: Set<string>,
     updatedExpenses?: ExpenseItem[],
-    updatedStandingInstructions?: StandingInstruction[]
+    updatedStandingInstructions?: StandingInstruction[],
+    updatedBankScheduledTransactions?: BankScheduledTransaction[]
   ) => {
     if (!currentUser) return;
     setAutoSaveStatus('Saving...');
@@ -163,6 +180,7 @@ export default function App() {
         installments: updatedInstallments,
         expenses: updatedExpenses || expenses,
         standingInstructions: updatedStandingInstructions || standingInstructions,
+        bankScheduledTransactions: updatedBankScheduledTransactions || bankScheduledTransactions,
         settings: updatedSettings,
         paidScheduleIds: Array.from(updatedPaid),
         scheduledScheduleIds: Array.from(updatedScheduled),
@@ -175,7 +193,7 @@ export default function App() {
       console.error('Auto-save error:', err);
       setAutoSaveStatus('Local state active');
     }
-  }, [currentUser, userDb, alertThresholds, expenses, standingInstructions]);
+  }, [currentUser, userDb, alertThresholds, expenses, standingInstructions, bankScheduledTransactions]);
 
   // Update dynamic alerts whenever accounts, installments, or currency changes
   useEffect(() => {
@@ -221,12 +239,197 @@ export default function App() {
     setUserDb(updatedDb);
     setAccounts(updatedDb.accounts || []);
     setInstallments(updatedDb.installments || []);
+    if (updatedDb.bankScheduledTransactions) {
+      setBankScheduledTransactions(updatedDb.bankScheduledTransactions);
+    }
     if (updatedDb.settings) {
       setSettings(updatedDb.settings);
       setAllocatedCash(updatedDb.settings.allocatedCashForBills || 3500);
       setStrategy(updatedDb.settings.defaultStrategy || 'grace_float');
     }
     setAutoSaveStatus('Synchronized');
+  };
+
+  // Update Income Settings Handler
+  const handleSaveIncomeSettings = (updatedSettings: UserSettings) => {
+    setSettings(updatedSettings);
+    triggerAutoSave(
+      accounts,
+      installments,
+      updatedSettings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      bankScheduledTransactions
+    );
+  };
+
+  // Schedule a new Bank Transaction
+  const handleScheduleBankTransaction = (txData: Omit<BankScheduledTransaction, 'id' | 'createdAt'>) => {
+    const newTx: BankScheduledTransaction = {
+      ...txData,
+      id: `btx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    const nextTxs = [newTx, ...bankScheduledTransactions];
+    setBankScheduledTransactions(nextTxs);
+
+    const nextScheduled = new Set(scheduledScheduleIds);
+    if (newTx.targetAccountId) {
+      nextScheduled.add(newTx.targetAccountId);
+      setScheduledScheduleIds(nextScheduled);
+    }
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      nextScheduled,
+      expenses,
+      standingInstructions,
+      nextTxs
+    );
+  };
+
+  // Execute a scheduled bank transaction
+  const handleExecuteBankTransaction = (txId: string) => {
+    const tx = bankScheduledTransactions.find((t) => t.id === txId);
+    if (!tx) return;
+    const nextAccounts = [...accounts];
+
+    // Deduct from funding bank account
+    const bankIdx = nextAccounts.findIndex((a) => a.id === tx.sourceBankAccountId);
+    if (bankIdx !== -1) {
+      const bank = nextAccounts[bankIdx];
+      nextAccounts[bankIdx] = {
+        ...bank,
+        totalBalance: Math.max(0, Math.round((bank.totalBalance - tx.amount) * 100) / 100),
+        lastSyncedAt: new Date().toISOString(),
+      };
+    }
+
+    // Deduct from target statement balance if credit card or BNPL
+    if (tx.targetAccountId) {
+      const targetIdx = nextAccounts.findIndex((a) => a.id === tx.targetAccountId);
+      if (targetIdx !== -1) {
+        const target = nextAccounts[targetIdx];
+        const newStatement = Math.max(0, Math.round((target.statementBalance - tx.amount) * 100) / 100);
+        const newTotal = Math.max(0, Math.round((target.totalBalance - tx.amount) * 100) / 100);
+        nextAccounts[targetIdx] = {
+          ...target,
+          statementBalance: newStatement,
+          totalBalance: newTotal,
+          status: newStatement === 0 ? 'settled' : target.status,
+          lastSyncedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    const nextTxs = bankScheduledTransactions.map((t) => {
+      if (t.id === txId) {
+        return {
+          ...t,
+          status: 'executed' as const,
+          executedAt: new Date().toISOString(),
+        };
+      }
+      return t;
+    });
+
+    setAccounts(nextAccounts);
+    setBankScheduledTransactions(nextTxs);
+    triggerAutoSave(
+      nextAccounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      nextTxs
+    );
+  };
+
+  // Cancel scheduled bank transaction
+  const handleCancelBankTransaction = (txId: string) => {
+    const nextTxs = bankScheduledTransactions.map((t) => {
+      if (t.id === txId) {
+        return { ...t, status: 'cancelled' as const };
+      }
+      return t;
+    });
+    setBankScheduledTransactions(nextTxs);
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      nextTxs
+    );
+  };
+
+  // Direct Immediate statement settlement from bank
+  const handleImmediateSettleAccount = (accountId: string, amount: number, sourceBankId: string) => {
+    const nextAccounts = [...accounts];
+    const bankIdx = nextAccounts.findIndex((a) => a.id === sourceBankId);
+    const targetIdx = nextAccounts.findIndex((a) => a.id === accountId);
+
+    if (bankIdx !== -1) {
+      const bank = nextAccounts[bankIdx];
+      nextAccounts[bankIdx] = {
+        ...bank,
+        totalBalance: Math.max(0, Math.round((bank.totalBalance - amount) * 100) / 100),
+        lastSyncedAt: new Date().toISOString(),
+      };
+    }
+
+    if (targetIdx !== -1) {
+      const target = nextAccounts[targetIdx];
+      const newStatement = Math.max(0, Math.round((target.statementBalance - amount) * 100) / 100);
+      const newTotal = Math.max(0, Math.round((target.totalBalance - amount) * 100) / 100);
+      nextAccounts[targetIdx] = {
+        ...target,
+        statementBalance: newStatement,
+        totalBalance: newTotal,
+        status: newStatement === 0 ? 'settled' : target.status,
+        lastSyncedAt: new Date().toISOString(),
+      };
+    }
+
+    const newTx: BankScheduledTransaction = {
+      id: `btx_imm_${Date.now()}`,
+      sourceBankAccountId: sourceBankId,
+      sourceBankAccountName: nextAccounts[bankIdx]?.name || 'Bank Account',
+      targetAccountId: accountId,
+      targetAccountName: nextAccounts[targetIdx]?.name || 'Card / BNPL Account',
+      type: nextAccounts[targetIdx]?.type === 'ewallet_pay_later' ? 'settlement_bnpl' : 'settlement_credit_card',
+      title: `Statement Settlement: ${nextAccounts[targetIdx]?.name || 'Card'}`,
+      amount,
+      scheduledDate: new Date().toISOString().split('T')[0],
+      status: 'executed',
+      executedAt: new Date().toISOString(),
+      notes: 'Immediate statement settlement executed directly via bank balance',
+      referenceNumber: `FPX-${Date.now().toString(36).toUpperCase()}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextTxs = [newTx, ...bankScheduledTransactions];
+    setAccounts(nextAccounts);
+    setBankScheduledTransactions(nextTxs);
+    triggerAutoSave(
+      nextAccounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      nextTxs
+    );
   };
 
   // Sync all balances with Open Banking API simulation
@@ -256,8 +459,8 @@ export default function App() {
 
   // Add new account with Free Tier limit check
   const handleAddAccount = async (newAcc: Omit<BillAccount, 'id' | 'apiSynced' | 'lastSyncedAt' | 'status' | 'accountNumberMask'>) => {
-    if (currentUser?.tier === 'free' && accounts.length >= (currentUser.tierLimits?.maxLinkedAccounts || 3)) {
-      setUpgradeReason(`Free Tier Limit: You have reached the maximum of ${currentUser.tierLimits?.maxLinkedAccounts || 3} linked accounts. Upgrade to Pro for unlimited accounts.`);
+    if (currentUser?.tier === 'free' && accounts.length >= (currentUser.tierLimits?.maxAccounts || 3)) {
+      setUpgradeReason(`Free Tier Limit: You have reached the maximum of ${currentUser.tierLimits?.maxAccounts || 3} linked accounts. Upgrade to Pro for unlimited accounts.`);
       setIsUpgradeModalOpen(true);
       return;
     }
@@ -276,13 +479,27 @@ export default function App() {
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds);
   };
 
-  // Upgrade to Pro handler
-  const handleUpgradeToPro = () => {
+  // Upgrade to Pro handler upon verified payment transaction
+  const handleUpgradeToPro = (paymentRecord: ProPaymentRecord) => {
     if (!currentUser) return;
-    const updated = UserDatabaseService.upgradeToPro(currentUser.id);
+    try {
+      const updated = UserDatabaseService.upgradeToPro(currentUser.id, paymentRecord);
+      if (updated) {
+        setCurrentUser(updated);
+        setAutoSaveStatus('Upgraded to Pro!');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Upgrade to Pro failed');
+    }
+  };
+
+  // Cancel or Downgrade subscription handler
+  const handleCancelSubscription = () => {
+    if (!currentUser) return;
+    const updated = UserDatabaseService.cancelProSubscription(currentUser.id);
     if (updated) {
       setCurrentUser(updated);
-      setAutoSaveStatus('Upgraded to Pro!');
+      setAutoSaveStatus('Reverted to Free Tier');
     }
   };
 
@@ -736,6 +953,10 @@ export default function App() {
         onOpenConnectBank={() => setIsConnectBankOpen(true)}
         onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
         onOpenFamilySync={() => setIsFamilySyncOpen(true)}
+        onOpenBankAdvisor={() => {
+          setAdvisorTargetAccountId(undefined);
+          setIsBankAdvisorOpen(true);
+        }}
         onRecordExpense={() => setActiveTab('expenses')}
         onLogout={handleLogout}
         onSyncAll={() => handleSyncAll()}
@@ -769,7 +990,17 @@ export default function App() {
                 <span>Free Plan</span>
               )}
             </span>
-            {currentUser.tier === 'free' && (
+            {currentUser.tier === 'pro' ? (
+              <button
+                onClick={() => {
+                  setUpgradeReason('');
+                  setIsUpgradeModalOpen(true);
+                }}
+                className="px-2 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 hover:text-white border border-indigo-500/40 text-[10px] font-bold cursor-pointer transition-colors"
+              >
+                Manage Subscription
+              </button>
+            ) : (
               <button
                 onClick={() => {
                   setUpgradeReason('Upgrade to Pro to eliminate all quotas and unlock unlimited accounts & recurring automations.');
@@ -805,6 +1036,11 @@ export default function App() {
           accounts={accounts}
           installments={installments}
           settings={settings}
+          onOpenIncomeSettings={() => setIsIncomeSettingsOpen(true)}
+          onOpenBankAdvisor={(accId) => {
+            setAdvisorTargetAccountId(accId);
+            setIsBankAdvisorOpen(true);
+          }}
         />
 
         {/* View Navigation Tabs */}
@@ -911,6 +1147,10 @@ export default function App() {
             scheduledScheduleIds={scheduledScheduleIds}
             onToggleStatus={handleToggleScheduleStatus}
             onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
+            onAdviseSettlement={(accId) => {
+              setAdvisorTargetAccountId(accId);
+              setIsBankAdvisorOpen(true);
+            }}
           />
         )}
 
@@ -1175,7 +1415,9 @@ export default function App() {
           onClose={() => setIsUpgradeModalOpen(false)}
           currentUser={currentUser}
           onUpgrade={handleUpgradeToPro}
+          onCancelSubscription={handleCancelSubscription}
           featureTriggered={upgradeReason}
+          currency={settings.currency || 'MYR'}
         />
       )}
 
@@ -1190,6 +1432,35 @@ export default function App() {
           onSwitchUser={handleSwitchUser}
         />
       )}
+
+      {/* Income & Paycheck Settings Modal */}
+      <IncomeSettingsModal
+        isOpen={isIncomeSettingsOpen}
+        onClose={() => setIsIncomeSettingsOpen(false)}
+        settings={settings}
+        accounts={accounts}
+        bankAccounts={accounts.filter((a) => a.type === 'bank_account')}
+        onSaveSettings={handleSaveIncomeSettings}
+      />
+
+      {/* Bank Settlement Advisor & Scheduler Modal */}
+      <BankSettlementAdvisorModal
+        isOpen={isBankAdvisorOpen}
+        onClose={() => setIsBankAdvisorOpen(false)}
+        accounts={accounts}
+        settings={settings}
+        standingInstructions={standingInstructions}
+        scheduledTransactions={bankScheduledTransactions}
+        initialSelectedAccountId={advisorTargetAccountId}
+        onScheduleTransaction={handleScheduleBankTransaction}
+        onExecuteTransaction={handleExecuteBankTransaction}
+        onCancelTransaction={handleCancelBankTransaction}
+        onOpenIncomeSettings={() => {
+          setIsBankAdvisorOpen(false);
+          setIsIncomeSettingsOpen(true);
+        }}
+        onImmediateSettleAccount={handleImmediateSettleAccount}
+      />
     </div>
   );
 }

@@ -7,9 +7,11 @@ import {
   UserSettings, 
   FamilyRole,
   ExpenseItem,
-  StandingInstruction 
+  StandingInstruction,
+  BankScheduledTransaction,
+  ProPaymentRecord
 } from '../types';
-import { INITIAL_ACCOUNTS, INITIAL_INSTALLMENTS, INITIAL_SETTINGS, INITIAL_EXPENSES, INITIAL_STANDING_INSTRUCTIONS } from '../data/seedData';
+import { INITIAL_ACCOUNTS, INITIAL_INSTALLMENTS, INITIAL_SETTINGS, INITIAL_EXPENSES, INITIAL_STANDING_INSTRUCTIONS, INITIAL_BANK_SCHEDULED_TRANSACTIONS } from '../data/seedData';
 
 const USERS_INDEX_KEY = 'billflow_registered_users';
 const ACTIVE_USER_KEY = 'billflow_active_user_id';
@@ -17,13 +19,38 @@ const DB_PREFIX = 'billflow_user_db_';
 
 export class UserDatabaseService {
   /**
-   * Returns list of all registered users
+   * Returns list of all registered users, ensuring no unpaid Pro access persists
    */
   static getRegisteredUsers(): UserProfile[] {
     try {
       const raw = localStorage.getItem(USERS_INDEX_KEY);
       if (raw) {
-        return JSON.parse(raw);
+        const users: UserProfile[] = JSON.parse(raw);
+        let modified = false;
+
+        // Security check: Guard against free/unverified upgrades without real payment
+        for (const user of users) {
+          if (user.tier === 'pro' && (!user.proPaymentRecord || user.proPaymentRecord.status !== 'active' || !user.proPaymentRecord.transactionId)) {
+            console.warn(`[Security Alert] User ${user.email} had Pro tier without verified payment. Reverting to Free tier.`);
+            user.tier = 'free';
+            user.proPaymentRecord = undefined;
+            user.tierLimits = {
+              maxAccounts: 3,
+              maxStandingInstructions: 3,
+              monthlyAiConsultations: 3,
+              monthlyReceiptExtractions: 5,
+              aiConsultationsUsed: user.tierLimits?.aiConsultationsUsed || 0,
+              receiptExtractionsUsed: user.tierLimits?.receiptExtractionsUsed || 0,
+            };
+            modified = true;
+          }
+        }
+
+        if (modified) {
+          localStorage.setItem(USERS_INDEX_KEY, JSON.stringify(users));
+        }
+
+        return users;
       }
       return [];
     } catch {
@@ -94,18 +121,45 @@ export class UserDatabaseService {
   }
 
   /**
-   * Upgrade user to Pro Tier (unlimited features)
+   * Upgrade user to Pro Tier upon verified payment processing
    */
-  static upgradeToPro(userId: string): UserProfile | null {
+  static upgradeToPro(userId: string, paymentRecord: ProPaymentRecord): UserProfile | null {
+    if (!paymentRecord || !paymentRecord.transactionId || paymentRecord.amount <= 0 || paymentRecord.status !== 'active') {
+      throw new Error('Upgrade to Pro rejected: Valid payment transaction record is required.');
+    }
     const users = this.getRegisteredUsers();
     const user = users.find((u) => u.id === userId);
     if (!user) return null;
     user.tier = 'pro';
+    user.proPaymentRecord = paymentRecord;
     user.tierLimits = {
       maxAccounts: 999,
       maxStandingInstructions: 999,
       monthlyAiConsultations: 999,
       monthlyReceiptExtractions: 999,
+      aiConsultationsUsed: user.tierLimits?.aiConsultationsUsed || 0,
+      receiptExtractionsUsed: user.tierLimits?.receiptExtractionsUsed || 0,
+    };
+    this.updateUserProfile(user);
+    return user;
+  }
+
+  /**
+   * Cancel or downgrade Pro subscription back to Free tier
+   */
+  static cancelProSubscription(userId: string): UserProfile | null {
+    const users = this.getRegisteredUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) return null;
+    user.tier = 'free';
+    if (user.proPaymentRecord) {
+      user.proPaymentRecord.status = 'cancelled';
+    }
+    user.tierLimits = {
+      maxAccounts: 3,
+      maxStandingInstructions: 3,
+      monthlyAiConsultations: 3,
+      monthlyReceiptExtractions: 5,
       aiConsultationsUsed: user.tierLimits?.aiConsultationsUsed || 0,
       receiptExtractionsUsed: user.tierLimits?.receiptExtractionsUsed || 0,
     };
@@ -245,6 +299,7 @@ export class UserDatabaseService {
       installments: initialInstallments,
       expenses: initialExpenses,
       standingInstructions: initialStandingInstructions,
+      bankScheduledTransactions: [...INITIAL_BANK_SCHEDULED_TRANSACTIONS],
       settings: { ...INITIAL_SETTINGS },
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -285,6 +340,9 @@ export class UserDatabaseService {
         if (!parsed.standingInstructions) {
           parsed.standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
         }
+        if (!parsed.bankScheduledTransactions) {
+          parsed.bankScheduledTransactions = [...INITIAL_BANK_SCHEDULED_TRANSACTIONS];
+        }
         return parsed;
       } catch (err) {
         console.warn('Error parsing user database from localStorage:', err);
@@ -306,6 +364,7 @@ export class UserDatabaseService {
       installments: INITIAL_INSTALLMENTS.slice(0, 2),
       expenses: INITIAL_EXPENSES.slice(0, 6),
       standingInstructions: INITIAL_STANDING_INSTRUCTIONS.slice(0, 2),
+      bankScheduledTransactions: [...INITIAL_BANK_SCHEDULED_TRANSACTIONS],
       settings: INITIAL_SETTINGS,
       paidScheduleIds: [],
       scheduledScheduleIds: [],

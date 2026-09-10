@@ -7,7 +7,10 @@ import {
   Zap, 
   CreditCard, 
   Wallet,
-  Clock
+  Clock,
+  Landmark,
+  ChevronRight,
+  ArrowUpRight
 } from 'lucide-react';
 import { BillAccount, InstallmentPlan, UserSettings } from '../types';
 import { formatCurrency } from '../utils/currency';
@@ -16,18 +19,22 @@ interface ExecutiveOverviewProps {
   accounts: BillAccount[];
   installments: InstallmentPlan[];
   settings: UserSettings;
+  onOpenIncomeSettings?: () => void;
+  onOpenBankAdvisor?: (accountId?: string) => void;
 }
 
 export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
-  accounts,
-  installments,
+  accounts = [],
+  installments = [],
   settings,
+  onOpenIncomeSettings,
+  onOpenBankAdvisor,
 }) => {
   const currency = settings.currency || 'MYR';
-  const totalBalance = accounts.reduce((sum, a) => sum + a.totalBalance, 0);
-  const totalStatementDue = accounts.reduce((sum, a) => sum + a.statementBalance, 0);
-  const totalCreditLimit = accounts.reduce((sum, a) => sum + a.creditLimit, 0);
-  const totalMonthlyInstallments = installments.reduce((sum, i) => sum + i.monthlyAmount, 0);
+  const totalBalance = (accounts || []).reduce((sum, a) => sum + a.totalBalance, 0);
+  const totalStatementDue = (accounts || []).reduce((sum, a) => sum + a.statementBalance, 0);
+  const totalCreditLimit = (accounts || []).reduce((sum, a) => sum + a.creditLimit, 0);
+  const totalMonthlyInstallments = (installments || []).reduce((sum, i) => sum + i.monthlyAmount, 0);
   
   // Calculate average utilization
   const utilizationRatio = totalCreditLimit > 0 ? (totalBalance / totalCreditLimit) * 100 : 0;
@@ -60,15 +67,38 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             </p>
           </div>
 
-          {/* Quick Paycheck Status */}
-          <div className="flex items-center gap-3 bg-slate-800/80 px-4 py-2.5 rounded-xl border border-indigo-500/20 text-xs">
-            <CalendarClock className="w-4 h-4 text-indigo-400 shrink-0" />
-            <div>
-              <div className="text-slate-400 font-medium">Income Paycheck Schedule</div>
-              <div className="font-semibold text-slate-200">
-                Days {settings.paycheckDates.join(' & ')} of Month ({formatCurrency(settings.monthlyIncome, currency)}/mo)
+          {/* Quick Paycheck Status & Bank Settlement Advisor CTA */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenIncomeSettings}
+              className="flex items-center gap-3 bg-slate-800/90 hover:bg-slate-800 px-3.5 py-2 rounded-xl border border-indigo-500/30 hover:border-indigo-500/50 text-xs transition-all cursor-pointer text-left group"
+              title="Click to adjust monthly income and paycheck schedule"
+            >
+              <CalendarClock className="w-4 h-4 text-indigo-400 shrink-0 group-hover:scale-110 transition-transform" />
+              <div>
+                <div className="text-slate-400 text-[11px] font-medium flex items-center gap-1">
+                  <span>Income & Paychecks</span>
+                  <ChevronRight className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+                </div>
+                <div className="font-semibold text-slate-200 text-xs">
+                  {formatCurrency(settings.monthlyIncome, currency)}/mo • Day {settings.paycheckDates.join(' & ')}
+                </div>
               </div>
-            </div>
+            </button>
+
+            {onOpenBankAdvisor && (
+              <button
+                type="button"
+                onClick={() => onOpenBankAdvisor()}
+                className="flex items-center gap-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-emerald-950/40 transition-all cursor-pointer group"
+                title="Calculate bank balance required to settle statements prior to due date"
+              >
+                <Landmark className="w-4 h-4 text-emerald-100 group-hover:scale-110 transition-transform" />
+                <span>Bank Settlement Advisor</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-emerald-200 opacity-80" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -106,8 +136,19 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             {formatCurrency(totalStatementDue, currency)}
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Due across next 30 days</span>
-            <span className="text-emerald-400 font-medium">0% interest if cleared</span>
+            <span>Due next 30 days</span>
+            {onOpenBankAdvisor ? (
+              <button
+                type="button"
+                onClick={() => onOpenBankAdvisor()}
+                className="text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-0.5 cursor-pointer hover:underline"
+              >
+                <span>Advise Bank Liquidity</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            ) : (
+              <span className="text-emerald-400 font-medium">0% interest if cleared</span>
+            )}
           </div>
         </div>
 
