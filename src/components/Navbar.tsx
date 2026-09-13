@@ -24,6 +24,7 @@ interface NavbarProps {
   onOpenFamilySync: () => void;
   onOpenBankAdvisor?: () => void;
   onRecordExpense?: () => void;
+  onOpenQuickAdd?: (tab?: 'expense' | 'bank_balance' | 'account' | 'recurring') => void;
   onLogout: () => void;
   onSyncAll: () => void;
   isSyncing: boolean;
@@ -41,6 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenFamilySync,
   onOpenBankAdvisor,
   onRecordExpense,
+  onOpenQuickAdd,
   onLogout,
   onSyncAll,
   isSyncing,
@@ -115,28 +117,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Record Bill / Expense Quick Action */}
-            {onRecordExpense && (
-              <button
-                id="btn-quick-record-expense"
-                onClick={onRecordExpense}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all cursor-pointer whitespace-nowrap"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Record Bill</span>
-                <span className="sm:hidden">Bill</span>
-              </button>
-            )}
-
-            {/* Connect Bank Button */}
+            {/* Unified Quick Add Action */}
             <button
-              id="btn-connect-account"
-              onClick={onOpenConnectBank}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+              id="btn-universal-quick-add"
+              onClick={() => {
+                if (onOpenQuickAdd) {
+                  onOpenQuickAdd('expense');
+                } else if (onRecordExpense) {
+                  onRecordExpense();
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/25 transition-all cursor-pointer whitespace-nowrap"
+              title="Quick Add: Log expense, update bank balance, or link accounts"
             >
-              <Plus className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden md:inline">Connect Account</span>
-              <span className="md:hidden">Add</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>Quick Add</span>
             </button>
 
             {/* Notification Bell */}

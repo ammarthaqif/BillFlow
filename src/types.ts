@@ -63,6 +63,8 @@ export interface ExpenseItem {
   notes?: string;
   ownerName?: string;
   ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
+  householdId?: string;
+  householdName?: string;
   settledAt?: string;
   settlementMethod?: SettlementMethod;
   settlementReference?: string;
@@ -92,6 +94,8 @@ export interface BillAccount {
   accountNumberMask: string;
   ownerName?: string;
   ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
+  householdId?: string;
+  householdName?: string;
 }
 
 export interface InstallmentPlan {
@@ -110,6 +114,8 @@ export interface InstallmentPlan {
   notes?: string;
   ownerName?: string;
   ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
+  householdId?: string;
+  householdName?: string;
 }
 
 export interface PaymentScheduleItem {
@@ -282,6 +288,7 @@ export interface UserProfile {
   email: string;
   familyRole: FamilyRole;
   householdName: string;
+  householdId?: string;
   createdAt: string;
   databaseId: string;
   tier: UserTier;
@@ -337,6 +344,8 @@ export interface UserDedicatedDatabase {
   databaseId: string;
   userId: string;
   userEmail: string;
+  householdId?: string;
+  householdName?: string;
   lastUpdated: string;
   version: number;
   accounts: BillAccount[];
@@ -361,6 +370,7 @@ export interface FamilySyncPackage {
     userEmail: string;
     familyRole: FamilyRole;
     householdName: string;
+    householdId?: string;
   };
   data: {
     accounts: BillAccount[];

@@ -58,6 +58,7 @@ interface ExpenseModalProps {
   editingExpense?: ExpenseItem | null;
   accounts: BillAccount[];
   currency?: CurrencyCode;
+  initialAccountId?: string;
 }
 
 export const ExpenseModal: React.FC<ExpenseModalProps> = ({
@@ -67,6 +68,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   editingExpense,
   accounts = [],
   currency = 'MYR',
+  initialAccountId,
 }) => {
   const currencyConfig = getCurrencyConfig(currency);
 
@@ -149,8 +151,19 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       setIsImmediateSettle(false);
       setSettlementMethod('instant_fpx');
 
-      // Default to first credit card, or BNPL, or bank
-      if (creditCardAccounts.length > 0) {
+      // Default to initialAccountId if provided, or first credit card, or BNPL, or bank
+      if (initialAccountId && accounts.some((a) => a.id === initialAccountId)) {
+        setAccountId(initialAccountId);
+        const target = accounts.find((a) => a.id === initialAccountId);
+        if (target?.type === 'credit_card') {
+          setPaymentMode('credit_card');
+        } else if (target?.type === 'ewallet_pay_later') {
+          setPaymentMode('bnpl');
+        } else if (target?.type === 'bank_account') {
+          setPaymentMode('cash');
+          setIsImmediateSettle(true);
+        }
+      } else if (creditCardAccounts.length > 0) {
         setAccountId(creditCardAccounts[0].id);
       } else if (accounts.length > 0) {
         setAccountId(accounts[0].id);

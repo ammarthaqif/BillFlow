@@ -8,6 +8,7 @@ import {
   UserProfile,
   UserDedicatedDatabase,
   ExpenseItem,
+  ExpenseCategory,
   SettlementMethod,
   StandingInstruction,
   BankScheduledTransaction,
@@ -33,6 +34,9 @@ import { renderAccountIcon, getAccountTypeLabel, calculateInterestSavedEstimate 
 // Subcomponents
 import { Navbar } from './components/Navbar';
 import { ExecutiveOverview } from './components/ExecutiveOverview';
+import { DailyHub } from './components/DailyHub';
+import { StrategyCashFlowHub } from './components/StrategyCashFlowHub';
+import { UniversalQuickAddModal } from './components/UniversalQuickAddModal';
 import { PaymentOptimizerMatrix } from './components/PaymentOptimizerMatrix';
 import { CycleGraceVisualizer } from './components/CycleGraceVisualizer';
 import { InstallmentsCashFlowTracker } from './components/InstallmentsCashFlowTracker';
@@ -47,6 +51,10 @@ import { ReceiptCaptureModal } from './components/ReceiptCaptureModal';
 import { UpgradeToProModal } from './components/UpgradeToProModal';
 import { IncomeSettingsModal } from './components/IncomeSettingsModal';
 import { BankSettlementAdvisorModal } from './components/BankSettlementAdvisorModal';
+import { UpdateBankBalanceModal } from './components/UpdateBankBalanceModal';
+import { AccountTransactionsModal } from './components/AccountTransactionsModal';
+import { EditAccountModal } from './components/EditAccountModal';
+import { ExpenseModal } from './components/ExpenseModal';
 
 import { 
   Sliders, 
@@ -66,7 +74,10 @@ import {
   Zap,
   CalendarClock,
   Crown,
-  Landmark
+  Landmark,
+  Edit3,
+  Layers,
+  Sun
 } from 'lucide-react';
 
 export default function App() {
@@ -91,8 +102,10 @@ export default function App() {
   // State: User settings
   const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
-  // Active view tab
-  const [activeTab, setActiveTab] = useState<'optimizer' | 'cycle_matrix' | 'installments' | 'accounts' | 'expenses' | 'standing_instructions'>('optimizer');
+  // Active view tab (default to 'today' for daily engagement & zero friction)
+  const [activeTab, setActiveTab] = useState<'today' | 'strategy' | 'expenses' | 'accounts' | 'optimizer' | 'cycle_matrix' | 'installments' | 'standing_instructions'>('today');
+  // Accounts sub-tab: 'cards' or 'standing_instructions'
+  const [accountsSubTab, setAccountsSubTab] = useState<'cards' | 'standing_instructions'>('cards');
 
   // Strategy & Simulation Cash
   const [strategy, setStrategy] = useState<PaymentStrategyType>('grace_float');
@@ -106,6 +119,10 @@ export default function App() {
   const [alerts, setAlerts] = useState<CustomAlert[]>([]);
   const [alertThresholds, setAlertThresholds] = useState<number[]>([7, 3, 1]);
 
+  // Universal Quick Add Modal
+  const [isUniversalQuickAddOpen, setIsUniversalQuickAddOpen] = useState(false);
+  const [universalQuickAddInitialTab, setUniversalQuickAddInitialTab] = useState<'expense' | 'bank_balance' | 'account' | 'recurring'>('expense');
+
   // Modals
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const [isConnectBankOpen, setIsConnectBankOpen] = useState(false);
@@ -116,6 +133,17 @@ export default function App() {
   const [isIncomeSettingsOpen, setIsIncomeSettingsOpen] = useState(false);
   const [isBankAdvisorOpen, setIsBankAdvisorOpen] = useState(false);
   const [advisorTargetAccountId, setAdvisorTargetAccountId] = useState<string | undefined>(undefined);
+
+  // Account management & transaction modals state
+  const [isUpdateBankBalanceOpen, setIsUpdateBankBalanceOpen] = useState(false);
+  const [selectedBankAccountIdForUpdate, setSelectedBankAccountIdForUpdate] = useState<string | undefined>(undefined);
+  const [isAccountTransactionsOpen, setIsAccountTransactionsOpen] = useState(false);
+  const [selectedAccountForTransactions, setSelectedAccountForTransactions] = useState<BillAccount | null>(null);
+  const [isEditAccountOpen, setIsEditAccountOpen] = useState(false);
+  const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<BillAccount | null>(null);
+  const [isStandaloneExpenseModalOpen, setIsStandaloneExpenseModalOpen] = useState(false);
+  const [standaloneExpenseInitialAccount, setStandaloneExpenseInitialAccount] = useState<string | undefined>(undefined);
+  const [standaloneEditingExpense, setStandaloneEditingExpense] = useState<ExpenseItem | null>(null);
 
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
@@ -617,7 +645,56 @@ export default function App() {
     const nextInstallments = installments.filter((i) => i.accountId !== id);
     setAccounts(nextAccounts);
     setInstallments(nextInstallments);
-    triggerAutoSave(nextAccounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds);
+    triggerAutoSave(nextAccounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
+  };
+
+  // Update existing account details
+  const handleUpdateAccount = (updatedAccount: BillAccount) => {
+    const nextAccounts = accounts.map((a) => (a.id === updatedAccount.id ? updatedAccount : a));
+    setAccounts(nextAccounts);
+    triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
+    setAutoSaveStatus(`Updated ${updatedAccount.name}`);
+  };
+
+  // Update Bank Account balance directly
+  const handleUpdateBankBalance = (accountId: string, newBalance: number, details?: Partial<BillAccount>) => {
+    const nextAccounts = accounts.map((a) => {
+      if (a.id === accountId) {
+        return {
+          ...a,
+          ...details,
+          totalBalance: Math.max(0, Math.round(newBalance * 100) / 100),
+          lastSyncedAt: new Date().toISOString(),
+        };
+      }
+      return a;
+    });
+    setAccounts(nextAccounts);
+    triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
+    setAutoSaveStatus(`Bank balance updated to ${formatCurrency(newBalance, settings.currency)}`);
+  };
+
+  // Sync statement balance from unsettled transactions for a credit card or BNPL
+  const handleSyncAccountBalanceFromTransactions = (accountId: string) => {
+    const unsettledSum = expenses
+      .filter((e) => e.accountId === accountId && e.status !== 'settled')
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const nextAccounts = accounts.map((a) => {
+      if (a.id === accountId) {
+        const rounded = Math.round(unsettledSum * 100) / 100;
+        return {
+          ...a,
+          statementBalance: rounded,
+          totalBalance: Math.max(a.totalBalance, rounded),
+          lastSyncedAt: new Date().toISOString(),
+        };
+      }
+      return a;
+    });
+    setAccounts(nextAccounts);
+    triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
+    setAutoSaveStatus(`Reconciled statement balance to ${formatCurrency(unsettledSum, settings.currency)}`);
   };
 
   // Add new installment plan
@@ -752,18 +829,100 @@ export default function App() {
     triggerAutoSave(nextAccounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
   };
 
+  // Quick Log single expense from Daily Hub without modal
+  const handleQuickLogExpense = (data: {
+    amount: number;
+    title: string;
+    category: ExpenseCategory;
+    accountId: string;
+    immediateSettle?: boolean;
+  }) => {
+    const acc = accounts.find((a) => a.id === data.accountId);
+    const primaryBank = accounts.find((a) => a.type === 'bank_account');
+    const immediate = data.immediateSettle ? {
+      method: 'instant_fpx' as SettlementMethod,
+      sourceAccountId: primaryBank?.id,
+    } : undefined;
+
+    handleAddExpense(
+      {
+        accountId: data.accountId,
+        accountName: acc?.name || 'Account',
+        accountType: acc?.type || 'credit_card',
+        title: data.title,
+        category: data.category,
+        amount: data.amount,
+        date: new Date().toISOString().split('T')[0],
+        status: data.immediateSettle ? 'settled' : 'unsettled',
+        paymentMode: acc?.type === 'ewallet_pay_later' ? 'bnpl' : acc?.type === 'bank_account' ? 'cash' : 'credit_card',
+        settlementMethod: data.immediateSettle ? 'instant_fpx' : undefined,
+        ownerName: currentUser?.name,
+        ownerRole: currentUser?.familyRole,
+      },
+      immediate
+    );
+  };
+
   // Update / Modify existing expense
   const handleUpdateExpense = (updatedExpense: ExpenseItem) => {
+    const oldExpense = expenses.find((e) => e.id === updatedExpense.id);
+    let nextAccounts = [...accounts];
+
+    if (oldExpense) {
+      // Revert old unsettled impact
+      if (oldExpense.status !== 'settled' && oldExpense.accountId) {
+        nextAccounts = nextAccounts.map((a) => {
+          if (a.id === oldExpense.accountId && a.type !== 'bank_account') {
+            return {
+              ...a,
+              totalBalance: Math.max(0, Math.round((a.totalBalance - oldExpense.amount) * 100) / 100),
+            };
+          }
+          return a;
+        });
+      }
+
+      // Apply new unsettled impact
+      if (updatedExpense.status !== 'settled' && updatedExpense.accountId) {
+        nextAccounts = nextAccounts.map((a) => {
+          if (a.id === updatedExpense.accountId && a.type !== 'bank_account') {
+            return {
+              ...a,
+              totalBalance: Math.round((a.totalBalance + updatedExpense.amount) * 100) / 100,
+            };
+          }
+          return a;
+        });
+      }
+    }
+
     const nextExpenses = expenses.map((e) => (e.id === updatedExpense.id ? updatedExpense : e));
     setExpenses(nextExpenses);
-    triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
+    setAccounts(nextAccounts);
+    triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
   };
 
   // Delete expense
   const handleDeleteExpense = (expenseId: string) => {
+    const target = expenses.find((e) => e.id === expenseId);
+    let nextAccounts = [...accounts];
+
+    if (target && target.status !== 'settled' && target.accountId) {
+      nextAccounts = nextAccounts.map((a) => {
+        if (a.id === target.accountId && a.type !== 'bank_account') {
+          return {
+            ...a,
+            totalBalance: Math.max(0, Math.round((a.totalBalance - target.amount) * 100) / 100),
+          };
+        }
+        return a;
+      });
+    }
+
     const nextExpenses = expenses.filter((e) => e.id !== expenseId);
     setExpenses(nextExpenses);
-    triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
+    setAccounts(nextAccounts);
+    triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
   };
 
   // Immediate Settlement for any existing purchase
@@ -957,7 +1116,14 @@ export default function App() {
           setAdvisorTargetAccountId(undefined);
           setIsBankAdvisorOpen(true);
         }}
-        onRecordExpense={() => setActiveTab('expenses')}
+        onRecordExpense={() => {
+          setUniversalQuickAddInitialTab('expense');
+          setIsUniversalQuickAddOpen(true);
+        }}
+        onOpenQuickAdd={(tab) => {
+          setUniversalQuickAddInitialTab(tab || 'expense');
+          setIsUniversalQuickAddOpen(true);
+        }}
         onLogout={handleLogout}
         onSyncAll={() => handleSyncAll()}
         isSyncing={isSyncing}
@@ -1043,58 +1209,32 @@ export default function App() {
           }}
         />
 
-        {/* View Navigation Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto border-b border-slate-800 pb-2 text-xs font-semibold scrollbar-none">
+        {/* Streamlined View Navigation Tabs */}
+        <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-800 pb-2 text-xs font-semibold scrollbar-none">
           <button
-            id="tab-optimizer"
-            onClick={() => setActiveTab('optimizer')}
+            id="tab-today-hub"
+            onClick={() => setActiveTab('today')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'optimizer'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+              activeTab === 'today'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
             }`}
           >
-            <Sliders className="w-4 h-4" />
-            <span>Payment Sequencing & Optimizer</span>
+            <Sun className="w-4 h-4 text-amber-400" />
+            <span>Today's Command Hub</span>
           </button>
 
           <button
-            id="tab-cycle-matrix"
-            onClick={() => setActiveTab('cycle_matrix')}
+            id="tab-strategy-hub"
+            onClick={() => setActiveTab('strategy')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'cycle_matrix'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+              activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
             }`}
           >
-            <Calendar className="w-4 h-4" />
-            <span>Cycle Dates & Grace Float Matrix</span>
-          </button>
-
-          <button
-            id="tab-installments"
-            onClick={() => setActiveTab('installments')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'installments'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <ShoppingBag className="w-4 h-4" />
-            <span>Multi-Month Installments & Cash Flow</span>
-          </button>
-
-          <button
-            id="tab-accounts"
-            onClick={() => setActiveTab('accounts')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'accounts'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Building2 className="w-4 h-4" />
-            <span>Linked Accounts ({accounts.length})</span>
+            <Sliders className="w-4 h-4 text-indigo-400" />
+            <span>Strategy & Cash Flow</span>
           </button>
 
           <button
@@ -1102,31 +1242,77 @@ export default function App() {
             onClick={() => setActiveTab('expenses')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'expenses'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
             }`}
           >
-            <Receipt className="w-4 h-4" />
-            <span>Daily Bills & Expenses ({expenses.length})</span>
+            <Receipt className="w-4 h-4 text-emerald-400" />
+            <span>Daily Expenses ({expenses.length})</span>
           </button>
 
           <button
-            id="tab-standing-instructions"
-            onClick={() => setActiveTab('standing_instructions')}
+            id="tab-accounts"
+            onClick={() => setActiveTab('accounts')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'standing_instructions'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+              activeTab === 'accounts' || activeTab === 'standing_instructions'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
             }`}
           >
-            <CalendarClock className="w-4 h-4" />
-            <span>Standing Instructions & Scheduled ({standingInstructions.length})</span>
+            <Building2 className="w-4 h-4 text-sky-400" />
+            <span>Accounts & Automations ({accounts.length})</span>
           </button>
         </div>
 
-        {/* Tab 1: Payment Optimizer & Sequencing Engine */}
-        {activeTab === 'optimizer' && (
-          <PaymentOptimizerMatrix
+        {/* Tab 1: Today's Daily Command Center */}
+        {activeTab === 'today' && (
+          <DailyHub
+            accounts={accounts}
+            installments={installments}
+            schedule={schedule}
+            expenses={expenses}
+            standingInstructions={standingInstructions}
+            settings={settings}
+            currency={settings.currency || 'MYR'}
+            onQuickLogExpense={handleQuickLogExpense}
+            onOpenReceiptCapture={() => setIsReceiptCaptureOpen(true)}
+            onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
+            onOpenBankAdvisor={(accId) => {
+              setAdvisorTargetAccountId(accId);
+              setIsBankAdvisorOpen(true);
+            }}
+            onOpenUniversalQuickAdd={(tab) => {
+              setUniversalQuickAddInitialTab(tab || 'expense');
+              setIsUniversalQuickAddOpen(true);
+            }}
+            onToggleScheduleStatus={(billId) => {
+              if (!paidScheduleIds.has(billId)) {
+                const nextPaid = new Set(paidScheduleIds);
+                const nextScheduled = new Set(scheduledScheduleIds);
+                nextScheduled.delete(billId);
+                nextPaid.add(billId);
+                setPaidScheduleIds(nextPaid);
+                setScheduledScheduleIds(nextScheduled);
+                triggerAutoSave(accounts, installments, settings, nextPaid, nextScheduled);
+              }
+            }}
+            onImmediateSettleExpense={handleImmediateSettleExpense}
+            onSwitchTab={(tab) => {
+              setActiveTab(tab);
+            }}
+          />
+        )}
+
+        {/* Tab 2: Strategy & Cash Flow Hub (Sequencer, Float Calendar, Installments) */}
+        {(activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments') && (
+          <StrategyCashFlowHub
+            initialView={
+              activeTab === 'cycle_matrix'
+                ? 'cycle_matrix'
+                : activeTab === 'installments'
+                ? 'installments'
+                : 'sequencer'
+            }
             accounts={accounts}
             schedule={schedule}
             strategy={strategy}
@@ -1151,22 +1337,7 @@ export default function App() {
               setAdvisorTargetAccountId(accId);
               setIsBankAdvisorOpen(true);
             }}
-          />
-        )}
-
-        {/* Tab 2: Billing Cycle & Grace Float Matrix */}
-        {activeTab === 'cycle_matrix' && (
-          <CycleGraceVisualizer
-            accounts={accounts}
-            currency={settings.currency || 'MYR'}
-          />
-        )}
-
-        {/* Tab 3: Multi-Month Installments Tracker */}
-        {activeTab === 'installments' && (
-          <InstallmentsCashFlowTracker
             installments={installments}
-            accounts={accounts}
             projections={projections}
             onAddInstallment={handleAddInstallment}
             onDeleteInstallment={handleDeleteInstallment}
@@ -1174,37 +1345,186 @@ export default function App() {
           />
         )}
 
-        {/* Tab 4: Connected Accounts Manager */}
-        {activeTab === 'accounts' && (
+        {/* Tab 4: Connected Accounts & Recurring Automations Hub */}
+        {(activeTab === 'accounts' || activeTab === 'standing_instructions') && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-white">Linked Accounts Hub</h2>
-                <p className="text-xs text-slate-400">
-                  Manage credit cards, e-wallets, and banking relationships stored in your dedicated database.
-                </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2 bg-slate-900/80 p-1 rounded-xl border border-slate-800 w-fit">
+                <button
+                  id="subtab-accounts-cards"
+                  onClick={() => setAccountsSubTab('cards')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    accountsSubTab === 'cards'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>Linked Accounts ({accounts.length})</span>
+                </button>
+                <button
+                  id="subtab-accounts-standing-instructions"
+                  onClick={() => setAccountsSubTab('standing_instructions')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    accountsSubTab === 'standing_instructions'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  <span>Standing Instructions ({standingInstructions.length})</span>
+                </button>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsFamilySyncOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-500/40 bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 font-semibold text-xs transition-colors cursor-pointer"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5" />
-                  <span>Sync Partner Accounts</span>
-                </button>
-                <button
-                  onClick={() => setIsConnectBankOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/20"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Link New Account</span>
-                </button>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {accountsSubTab === 'cards' ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        const bank = accounts.find((a) => a.type === 'bank_account');
+                        setSelectedBankAccountIdForUpdate(bank?.id);
+                        setIsUpdateBankBalanceOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 font-semibold text-xs transition-colors cursor-pointer"
+                    >
+                      <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Update Bank Balance</span>
+                    </button>
+                    <button
+                      onClick={() => setIsFamilySyncOpen(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-500/40 bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 font-semibold text-xs transition-colors cursor-pointer"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Sync Partner Accounts</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUniversalQuickAddInitialTab('account');
+                        setIsUniversalQuickAddOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/20"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Link New Account</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setUniversalQuickAddInitialTab('recurring');
+                      setIsUniversalQuickAddOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors cursor-pointer shadow-md shadow-indigo-600/20"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>New Standing Instruction</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {accountsSubTab === 'cards' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {accounts.map((acc) => {
+                const isBank = acc.type === 'bank_account';
                 const utilRatio = Math.round((acc.statementBalance / (acc.creditLimit || 1)) * 100);
+                const accExpenses = expenses.filter((e) => e.accountId === acc.id);
+                const pendingCount = accExpenses.filter((e) => e.status !== 'settled').length;
+
+                if (isBank) {
+                  return (
+                    <div
+                      key={acc.id}
+                      className="p-4 rounded-2xl border border-emerald-500/30 bg-gradient-to-b from-slate-900 via-slate-900 to-emerald-950/20 hover:border-emerald-500/50 transition-all space-y-3 relative group"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shadow-md bg-emerald-600 text-white"
+                          >
+                            <Building2 className="w-5 h-5 text-white" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-white text-sm">{acc.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                Liquid Cash
+                              </span>
+                              {acc.ownerName && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-slate-800 border border-slate-700 text-slate-300">
+                                  {acc.ownerName}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400">{acc.institution} • {acc.accountNumberMask}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setSelectedAccountForEdit(acc);
+                              setIsEditAccountOpen(true);
+                            }}
+                            className="text-slate-500 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                            title="Edit Account Details"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAccount(acc.id)}
+                            className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                            title="Disconnect Account"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Liquid Cash Display */}
+                      <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/50 space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400 font-medium">Available Liquid Cash</span>
+                          <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            Settlement Liquidity
+                          </span>
+                        </div>
+                        <div className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
+                          {formatCurrency(acc.totalBalance, settings.currency)}
+                        </div>
+                        <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
+                          <span>Verified: {acc.lastSyncedAt ? new Date(acc.lastSyncedAt).toLocaleDateString() : 'Active'}</span>
+                          <span>FPX & Direct Pay Ready</span>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons for Bank */}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          onClick={() => {
+                            setSelectedBankAccountIdForUpdate(acc.id);
+                            setIsUpdateBankBalanceOpen(true);
+                          }}
+                          className="w-full py-2 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm shadow-emerald-600/30"
+                        >
+                          <Wallet className="w-3.5 h-3.5" />
+                          <span>Update Balance</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedAccountForTransactions(acc);
+                            setIsAccountTransactionsOpen(true);
+                          }}
+                          className="w-full py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Transactions ({accExpenses.length})</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
 
                 return (
                   <div
@@ -1241,13 +1561,25 @@ export default function App() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => handleDeleteAccount(acc.id)}
-                        className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                        title="Disconnect Account"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setSelectedAccountForEdit(acc);
+                            setIsEditAccountOpen(true);
+                          }}
+                          className="text-slate-500 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                          title="Edit Account Details"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAccount(acc.id)}
+                          className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                          title="Disconnect Account"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-700/50">
@@ -1272,8 +1604,10 @@ export default function App() {
                         <div className="font-medium text-slate-200">{acc.apr}%</div>
                       </div>
                       <div>
-                        <span className="text-[11px] text-slate-400">Late Penalty</span>
-                        <div className="font-medium text-rose-400">{formatCurrency(acc.lateFee, settings.currency)}</div>
+                        <span className="text-[11px] text-slate-400">Unsettled Swipes</span>
+                        <div className="font-medium text-indigo-300 font-mono">
+                          {pendingCount} pending
+                        </div>
                       </div>
                     </div>
 
@@ -1294,10 +1628,51 @@ export default function App() {
                         />
                       </div>
                     </div>
+
+                    {/* Action Buttons for Card / BNPL */}
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
+                      <button
+                        onClick={() => {
+                          setSelectedAccountForTransactions(acc);
+                          setIsAccountTransactionsOpen(true);
+                        }}
+                        className="w-full py-1.5 px-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-500/40 text-indigo-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <CreditCard className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Transactions ({accExpenses.length})</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStandaloneExpenseInitialAccount(acc.id);
+                          setStandaloneEditingExpense(null);
+                          setIsStandaloneExpenseModalOpen(true);
+                        }}
+                        className="w-full py-1.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Record Swipe</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })}
             </div>
+          ) : (
+            <StandingInstructionsManager
+              standingInstructions={standingInstructions}
+              accounts={accounts}
+              currency={settings.currency || 'MYR'}
+              onAdd={handleAddStandingInstruction}
+              onUpdate={handleUpdateStandingInstruction}
+              onDelete={handleDeleteStandingInstruction}
+              onExecuteNow={handleExecuteStandingInstructionNow}
+              currentUser={currentUser}
+              onUpgradeToPro={() => {
+                setUpgradeReason('Free Plan Limit: Maximum of 3 standing instructions reached. Upgrade to Pro for unlimited recurring automations.');
+                setIsUpgradeModalOpen(true);
+              }}
+            />
+          )}
           </div>
         )}
 
@@ -1314,23 +1689,17 @@ export default function App() {
             onConvertToInstallment={handleConvertToInstallment}
             onBatchSettleUnsettled={handleBatchSettleUnsettled}
             onOpenReceiptCapture={() => setIsReceiptCaptureOpen(true)}
-          />
-        )}
-
-        {/* Tab 6: Recurring Bills & Standing Instructions */}
-        {activeTab === 'standing_instructions' && (
-          <StandingInstructionsManager
-            standingInstructions={standingInstructions}
-            accounts={accounts}
-            currency={settings.currency || 'MYR'}
-            onAdd={handleAddStandingInstruction}
-            onUpdate={handleUpdateStandingInstruction}
-            onDelete={handleDeleteStandingInstruction}
-            onExecuteNow={handleExecuteStandingInstructionNow}
-            currentUser={currentUser}
-            onUpgradeToPro={() => {
-              setUpgradeReason('Free Plan Limit: Maximum of 3 standing instructions reached. Upgrade to Pro for unlimited recurring automations.');
-              setIsUpgradeModalOpen(true);
+            onOpenAccountTransactions={(acc) => {
+              setSelectedAccountForTransactions(acc);
+              setIsAccountTransactionsOpen(true);
+            }}
+            onOpenUpdateBankBalance={(accId) => {
+              setSelectedBankAccountIdForUpdate(accId);
+              setIsUpdateBankBalanceOpen(true);
+            }}
+            onEditAccount={(acc) => {
+              setSelectedAccountForEdit(acc);
+              setIsEditAccountOpen(true);
             }}
           />
         )}
@@ -1461,6 +1830,127 @@ export default function App() {
         }}
         onImmediateSettleAccount={handleImmediateSettleAccount}
       />
+
+      {/* Update Bank Balance Modal */}
+      <UpdateBankBalanceModal
+        isOpen={isUpdateBankBalanceOpen}
+        onClose={() => {
+          setIsUpdateBankBalanceOpen(false);
+          setSelectedBankAccountIdForUpdate(undefined);
+        }}
+        accounts={accounts}
+        currency={settings.currency || 'MYR'}
+        selectedAccountId={selectedBankAccountIdForUpdate}
+        onUpdateBalance={handleUpdateBankBalance}
+      />
+
+      {/* Account Specific Transactions & Settlement Manager */}
+      <AccountTransactionsModal
+        isOpen={isAccountTransactionsOpen}
+        onClose={() => {
+          setIsAccountTransactionsOpen(false);
+          setSelectedAccountForTransactions(null);
+        }}
+        account={selectedAccountForTransactions}
+        accounts={accounts}
+        expenses={expenses}
+        currency={settings.currency || 'MYR'}
+        onAddExpense={() => {
+          if (selectedAccountForTransactions) {
+            setStandaloneExpenseInitialAccount(selectedAccountForTransactions.id);
+            setStandaloneEditingExpense(null);
+            setIsStandaloneExpenseModalOpen(true);
+          }
+        }}
+        onUpdateExpense={handleUpdateExpense}
+        onDeleteExpense={handleDeleteExpense}
+        onImmediateSettleExpense={handleImmediateSettleExpense}
+        onUpdateAccount={handleUpdateAccount}
+        onOpenUpdateBankBalance={(accId) => {
+          setSelectedBankAccountIdForUpdate(accId);
+          setIsUpdateBankBalanceOpen(true);
+        }}
+        onSyncStatementFromTransactions={handleSyncAccountBalanceFromTransactions}
+      />
+
+      {/* Edit Account Modal */}
+      <EditAccountModal
+        isOpen={isEditAccountOpen}
+        onClose={() => {
+          setIsEditAccountOpen(false);
+          setSelectedAccountForEdit(null);
+        }}
+        account={selectedAccountForEdit}
+        currency={settings.currency || 'MYR'}
+        onSave={handleUpdateAccount}
+        onDelete={handleDeleteAccount}
+      />
+
+      {/* Standalone Expense Modal for account-targeted transactions */}
+      <ExpenseModal
+        isOpen={isStandaloneExpenseModalOpen}
+        onClose={() => {
+          setIsStandaloneExpenseModalOpen(false);
+          setStandaloneEditingExpense(null);
+          setStandaloneExpenseInitialAccount(undefined);
+        }}
+        editingExpense={standaloneEditingExpense}
+        accounts={accounts}
+        currency={settings.currency || 'MYR'}
+        initialAccountId={standaloneExpenseInitialAccount}
+        onSaveExpense={(data, immediateSettle, installmentSplit) => {
+          if (standaloneEditingExpense && standaloneEditingExpense.id) {
+            handleUpdateExpense({
+              ...standaloneEditingExpense,
+              ...data,
+            });
+          } else {
+            handleAddExpense(data, immediateSettle, installmentSplit);
+          }
+          setIsStandaloneExpenseModalOpen(false);
+          setStandaloneEditingExpense(null);
+          setStandaloneExpenseInitialAccount(undefined);
+        }}
+      />
+
+      {/* Universal Quick Add Modal (Unified entry point for expenses, bank balance, accounts, recurring) */}
+      <UniversalQuickAddModal
+        isOpen={isUniversalQuickAddOpen}
+        onClose={() => setIsUniversalQuickAddOpen(false)}
+        accounts={accounts}
+        currency={settings.currency || 'MYR'}
+        initialTab={universalQuickAddInitialTab}
+        onAddExpense={(data, immediateSettle, installmentSplit) => {
+          handleAddExpense(data, immediateSettle, installmentSplit);
+        }}
+        onUpdateBankBalance={(accId, newBal, note) => {
+          handleUpdateBankBalance(accId, newBal, note);
+        }}
+        onAddAccount={(newAcc) => {
+          handleAddAccount(newAcc);
+        }}
+        onAddStandingInstruction={(si) => {
+          handleAddStandingInstruction(si);
+        }}
+        onOpenReceiptCapture={() => {
+          setIsUniversalQuickAddOpen(false);
+          setIsReceiptCaptureOpen(true);
+        }}
+      />
+
+      {/* Floating Quick Action Button for fast single-click action across any tab */}
+      <button
+        id="btn-floating-quick-add"
+        onClick={() => {
+          setUniversalQuickAddInitialTab('expense');
+          setIsUniversalQuickAddOpen(true);
+        }}
+        className="fixed bottom-6 right-6 z-30 px-4 py-3 rounded-full bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-xl shadow-indigo-600/35 flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 transition-all group"
+        title="Quick Add: Swipe, Balance, Account, or Recurring"
+      >
+        <Plus className="w-5 h-5 font-bold group-hover:rotate-90 transition-transform duration-200" />
+        <span className="text-xs font-bold tracking-wide">Quick Add</span>
+      </button>
     </div>
   );
 }

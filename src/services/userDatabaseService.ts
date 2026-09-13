@@ -19,7 +19,16 @@ const DB_PREFIX = 'billflow_user_db_';
 
 export class UserDatabaseService {
   /**
+   * Helper to generate a standardized household ID slug from household name
+   */
+  static normalizeHouseholdId(name?: string): string {
+    const clean = (name || 'my_family').trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+    return `hh_${clean || 'default'}`;
+  }
+
+  /**
    * Returns list of all registered users, ensuring no unpaid Pro access persists
+   * and ensuring all users have a valid householdId.
    */
   static getRegisteredUsers(): UserProfile[] {
     try {
@@ -28,8 +37,13 @@ export class UserDatabaseService {
         const users: UserProfile[] = JSON.parse(raw);
         let modified = false;
 
-        // Security check: Guard against free/unverified upgrades without real payment
+        // Security check & household backfill
         for (const user of users) {
+          if (!user.householdId) {
+            user.householdId = this.normalizeHouseholdId(user.householdName);
+            modified = true;
+          }
+
           if (user.tier === 'pro' && (!user.proPaymentRecord || user.proPaymentRecord.status !== 'active' || !user.proPaymentRecord.transactionId)) {
             console.warn(`[Security Alert] User ${user.email} had Pro tier without verified payment. Reverting to Free tier.`);
             user.tier = 'free';
@@ -56,6 +70,53 @@ export class UserDatabaseService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Returns only users belonging to the same household
+   */
+  static getHouseholdMembers(currentUser: UserProfile): UserProfile[] {
+    const allUsers = this.getRegisteredUsers();
+    const currentHId = currentUser.householdId || this.normalizeHouseholdId(currentUser.householdName);
+    const currentHName = (currentUser.householdName || '').trim().toLowerCase();
+
+    return allUsers.filter((u) => {
+      const uHId = u.householdId || this.normalizeHouseholdId(u.householdName);
+      const uHName = (u.householdName || '').trim().toLowerCase();
+      return uHId === currentHId || (currentHName && uHName === currentHName);
+    });
+  }
+
+  /**
+   * Returns users grouped by other households on this device
+   */
+  static getOtherHouseholdGroups(currentUser: UserProfile): Array<{
+    householdId: string;
+    householdName: string;
+    members: UserProfile[];
+  }> {
+    const allUsers = this.getRegisteredUsers();
+    const currentHId = currentUser.householdId || this.normalizeHouseholdId(currentUser.householdName);
+    const currentHName = (currentUser.householdName || '').trim().toLowerCase();
+
+    const otherUsers = allUsers.filter((u) => {
+      const uHId = u.householdId || this.normalizeHouseholdId(u.householdName);
+      const uHName = (u.householdName || '').trim().toLowerCase();
+      return uHId !== currentHId && (!currentHName || uHName !== currentHName);
+    });
+
+    const groupsMap = new Map<string, { householdId: string; householdName: string; members: UserProfile[] }>();
+
+    for (const u of otherUsers) {
+      const hId = u.householdId || this.normalizeHouseholdId(u.householdName);
+      const hName = u.householdName || 'Other Household';
+      if (!groupsMap.has(hId)) {
+        groupsMap.set(hId, { householdId: hId, householdName: hName, members: [] });
+      }
+      groupsMap.get(hId)!.members.push(u);
+    }
+
+    return Array.from(groupsMap.values());
   }
 
   /**
@@ -209,6 +270,7 @@ export class UserDatabaseService {
     email: string;
     familyRole: FamilyRole;
     householdName?: string;
+    householdId?: string;
     initialDataTemplate?: 'husband_starter' | 'wife_starter' | 'standard' | 'blank';
   }): { user: UserProfile; db: UserDedicatedDatabase } {
     const users = this.getRegisteredUsers();
@@ -220,13 +282,16 @@ export class UserDatabaseService {
     const userId = `usr_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
     const cleanName = params.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
     const databaseId = `db_${cleanName}_${Date.now().toString(36)}`;
+    const householdName = params.householdName?.trim() || 'My Family';
+    const householdId = params.householdId || this.normalizeHouseholdId(householdName);
 
     const newUser: UserProfile = {
       id: userId,
       name: params.name.trim(),
       email: params.email.trim().toLowerCase(),
       familyRole: params.familyRole,
-      householdName: params.householdName?.trim() || 'My Family',
+      householdName,
+      householdId,
       createdAt: new Date().toISOString(),
       databaseId,
       tier: 'free',
@@ -252,18 +317,24 @@ export class UserDatabaseService {
         id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
+        householdId,
+        householdName,
       }));
       initialInstallments = INITIAL_INSTALLMENTS.slice(1, 3).map((i) => ({
         ...i,
         id: `inst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
+        householdId,
+        householdName,
       }));
       initialExpenses = INITIAL_EXPENSES.filter((e) => e.ownerRole !== 'husband').slice(0, 5).map((e) => ({
         ...e,
         id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
+        householdId,
+        householdName,
       }));
       initialStandingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(1, 3);
     } else if (params.initialDataTemplate !== 'blank') {
@@ -273,18 +344,24 @@ export class UserDatabaseService {
         id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
+        householdId,
+        householdName,
       }));
       initialInstallments = INITIAL_INSTALLMENTS.slice(0, 2).map((i) => ({
         ...i,
         id: `inst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
+        householdId,
+        householdName,
       }));
       initialExpenses = INITIAL_EXPENSES.slice(0, 6).map((e) => ({
         ...e,
         id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         ownerName: `${newUser.name} (${newUser.familyRole})`,
         ownerRole: newUser.familyRole,
+        householdId,
+        householdName,
       }));
       initialStandingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
     }
@@ -293,6 +370,8 @@ export class UserDatabaseService {
       databaseId,
       userId,
       userEmail: newUser.email,
+      householdId,
+      householdName,
       lastUpdated: new Date().toISOString(),
       version: 1,
       accounts: initialAccounts,
@@ -437,6 +516,7 @@ export class UserDatabaseService {
         userEmail: user.email,
         familyRole: user.familyRole,
         householdName: user.householdName,
+        householdId: user.householdId || this.normalizeHouseholdId(user.householdName),
       },
       data: {
         accounts: selectedAccounts,
@@ -456,6 +536,7 @@ export class UserDatabaseService {
 
   /**
    * Import and synchronize family data into current dedicated database
+   * with strict household boundary validation to prevent cross-household contamination.
    */
   static importFamilyData(
     currentDb: UserDedicatedDatabase,
@@ -464,10 +545,28 @@ export class UserDatabaseService {
       mode: 'merge' | 'replace';
       tagWithOwner: boolean;
       customOwnerTag?: string;
+      targetHouseholdName?: string;
+      targetHouseholdId?: string;
+      allowCrossHouseholdMerge?: boolean;
     }
   ): { updatedDb: UserDedicatedDatabase; accountsAdded: number; installmentsAdded: number; expensesAdded?: number } {
     if (syncPackage.format !== 'billflow-family-sync') {
       throw new Error('Invalid file format. Please upload a valid BillFlow Family Sync file.');
+    }
+
+    // Household Isolation Guard
+    const targetHName = (options.targetHouseholdName || currentDb.householdName || '').trim().toLowerCase();
+    const incomingHName = (syncPackage.exportedBy.householdName || '').trim().toLowerCase();
+    const targetHId = options.targetHouseholdId || currentDb.householdId || this.normalizeHouseholdId(targetHName);
+    const incomingHId = syncPackage.exportedBy.householdId || this.normalizeHouseholdId(incomingHName);
+
+    const isCrossHousehold = (targetHId && incomingHId && targetHId !== incomingHId) ||
+      (targetHName && incomingHName && targetHName !== incomingHName);
+
+    if (isCrossHousehold && !options.allowCrossHouseholdMerge) {
+      throw new Error(
+        `Household Isolation Guard: This sync package originates from household "${syncPackage.exportedBy.householdName}", while your active profile belongs to "${options.targetHouseholdName || currentDb.householdName || 'Current Household'}". Cross-household syncing is blocked to prevent accidental merging of accounts between different households.`
+      );
     }
 
     const partnerName = syncPackage.exportedBy.userName || 'Family Partner';
@@ -478,19 +577,27 @@ export class UserDatabaseService {
       // Full replacement
       const updatedDb: UserDedicatedDatabase = {
         ...currentDb,
+        householdId: targetHId,
+        householdName: options.targetHouseholdName || currentDb.householdName,
         lastUpdated: new Date().toISOString(),
         version: currentDb.version + 1,
         accounts: syncPackage.data.accounts.map((a) => ({
           ...a,
           ownerName: options.tagWithOwner ? a.ownerName || ownerLabel : a.ownerName,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         })),
         installments: syncPackage.data.installments.map((i) => ({
           ...i,
           ownerName: options.tagWithOwner ? i.ownerName || ownerLabel : i.ownerName,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         })),
         expenses: (syncPackage.data.expenses || []).map((e) => ({
           ...e,
           ownerName: options.tagWithOwner ? e.ownerName || ownerLabel : e.ownerName,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         })),
       };
       this.saveUserDatabase(updatedDb);
@@ -513,12 +620,16 @@ export class UserDatabaseService {
           id: `sync-${partnerRole}-${incomingAcc.id}-${Date.now().toString(36)}`,
           ownerName: options.tagWithOwner ? incomingAcc.ownerName || ownerLabel : incomingAcc.ownerName,
           ownerRole: partnerRole,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         });
       } else {
         newAccounts.push({
           ...incomingAcc,
           ownerName: options.tagWithOwner ? incomingAcc.ownerName || ownerLabel : incomingAcc.ownerName,
           ownerRole: partnerRole,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         });
       }
     }
@@ -534,12 +645,16 @@ export class UserDatabaseService {
           id: `sync-inst-${partnerRole}-${incomingInst.id}-${Date.now().toString(36)}`,
           ownerName: options.tagWithOwner ? incomingInst.ownerName || ownerLabel : incomingInst.ownerName,
           ownerRole: partnerRole,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         });
       } else {
         newInstallments.push({
           ...incomingInst,
           ownerName: options.tagWithOwner ? incomingInst.ownerName || ownerLabel : incomingInst.ownerName,
           ownerRole: partnerRole,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         });
       }
     }
@@ -555,18 +670,24 @@ export class UserDatabaseService {
           id: `sync-exp-${partnerRole}-${incomingExp.id}-${Date.now().toString(36)}`,
           ownerName: options.tagWithOwner ? incomingExp.ownerName || ownerLabel : incomingExp.ownerName,
           ownerRole: partnerRole,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         });
       } else {
         newExpenses.push({
           ...incomingExp,
           ownerName: options.tagWithOwner ? incomingExp.ownerName || ownerLabel : incomingExp.ownerName,
           ownerRole: partnerRole,
+          householdId: targetHId,
+          householdName: options.targetHouseholdName || currentDb.householdName,
         });
       }
     }
 
     const updatedDb: UserDedicatedDatabase = {
       ...currentDb,
+      householdId: targetHId,
+      householdName: options.targetHouseholdName || currentDb.householdName,
       lastUpdated: new Date().toISOString(),
       version: currentDb.version + 1,
       accounts: [...currentDb.accounts, ...newAccounts],
@@ -582,5 +703,124 @@ export class UserDatabaseService {
       installmentsAdded: newInstallments.length,
       expensesAdded: newExpenses.length,
     };
+  }
+
+  /**
+   * Audit accounts and detect any foreign or cross-household data
+   */
+  static auditHouseholdAccounts(
+    db: UserDedicatedDatabase,
+    currentUser: UserProfile
+  ): {
+    foreignAccounts: BillAccount[];
+    foreignInstallments: InstallmentPlan[];
+    foreignExpenses: ExpenseItem[];
+    isContaminated: boolean;
+  } {
+    const currentHId = currentUser.householdId || this.normalizeHouseholdId(currentUser.householdName);
+    const currentHName = (currentUser.householdName || '').trim().toLowerCase();
+
+    // Household members
+    const householdMembers = this.getHouseholdMembers(currentUser);
+    const memberRoles = new Set(householdMembers.map((m) => m.familyRole));
+    const memberNames = new Set(householdMembers.map((m) => m.name.toLowerCase()));
+
+    const foreignAccounts = db.accounts.filter((acc) => {
+      // Direct household mismatch
+      if (acc.householdId && acc.householdId !== currentHId) return true;
+      if (acc.householdName && acc.householdName.trim().toLowerCase() !== currentHName) return true;
+      
+      // Check if account was synced from an external user who is not a member of current household
+      if (acc.id.startsWith('sync-') && acc.ownerName) {
+        const lowerOwner = acc.ownerName.toLowerCase();
+        const matchesAnyMember = Array.from(memberNames).some((n) => lowerOwner.includes(n));
+        if (!matchesAnyMember && !memberRoles.has(acc.ownerRole as any)) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    const foreignAccountIds = new Set(foreignAccounts.map((a) => a.id));
+
+    const foreignInstallments = db.installments.filter((inst) => {
+      if (foreignAccountIds.has(inst.accountId)) return true;
+      if (inst.householdId && inst.householdId !== currentHId) return true;
+      if (inst.householdName && inst.householdName.trim().toLowerCase() !== currentHName) return true;
+      return false;
+    });
+
+    const foreignExpenses = (db.expenses || []).filter((exp) => {
+      if (foreignAccountIds.has(exp.accountId)) return true;
+      if (exp.householdId && exp.householdId !== currentHId) return true;
+      if (exp.householdName && exp.householdName.trim().toLowerCase() !== currentHName) return true;
+      return false;
+    });
+
+    return {
+      foreignAccounts,
+      foreignInstallments,
+      foreignExpenses,
+      isContaminated: foreignAccounts.length > 0 || foreignInstallments.length > 0 || foreignExpenses.length > 0,
+    };
+  }
+
+  /**
+   * Purge foreign accounts and their linked items from the database
+   */
+  static purgeForeignAccounts(
+    db: UserDedicatedDatabase,
+    accountIdsToPurge: string[]
+  ): UserDedicatedDatabase {
+    const purgeSet = new Set(accountIdsToPurge);
+
+    const updatedDb: UserDedicatedDatabase = {
+      ...db,
+      lastUpdated: new Date().toISOString(),
+      version: db.version + 1,
+      accounts: db.accounts.filter((a) => !purgeSet.has(a.id)),
+      installments: db.installments.filter((i) => !purgeSet.has(i.accountId) && !purgeSet.has(i.id)),
+      expenses: (db.expenses || []).filter((e) => !purgeSet.has(e.accountId) && !purgeSet.has(e.id)),
+    };
+
+    this.saveUserDatabase(updatedDb);
+    return updatedDb;
+  }
+
+  /**
+   * Reassign all accounts in database to belong cleanly to current user and household
+   */
+  static reassignAllAccountsToCurrentHousehold(
+    db: UserDedicatedDatabase,
+    currentUser: UserProfile
+  ): UserDedicatedDatabase {
+    const currentHId = currentUser.householdId || this.normalizeHouseholdId(currentUser.householdName);
+    const currentHName = currentUser.householdName;
+
+    const updatedDb: UserDedicatedDatabase = {
+      ...db,
+      householdId: currentHId,
+      householdName: currentHName,
+      lastUpdated: new Date().toISOString(),
+      version: db.version + 1,
+      accounts: db.accounts.map((a) => ({
+        ...a,
+        householdId: currentHId,
+        householdName: currentHName,
+      })),
+      installments: db.installments.map((i) => ({
+        ...i,
+        householdId: currentHId,
+        householdName: currentHName,
+      })),
+      expenses: (db.expenses || []).map((e) => ({
+        ...e,
+        householdId: currentHId,
+        householdName: currentHName,
+      })),
+    };
+
+    this.saveUserDatabase(updatedDb);
+    return updatedDb;
   }
 }

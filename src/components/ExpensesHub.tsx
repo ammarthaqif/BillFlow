@@ -75,6 +75,9 @@ interface ExpensesHubProps {
   onBatchSettleUnsettled?: (expenseIds: string[]) => void;
   onOpenPresetModal?: (preset: DayToDayBillPreset) => void;
   onOpenReceiptCapture?: () => void;
+  onOpenAccountTransactions?: (account: BillAccount) => void;
+  onOpenUpdateBankBalance?: (accountId: string) => void;
+  onEditAccount?: (account: BillAccount) => void;
 }
 
 export const ExpensesHub: React.FC<ExpensesHubProps> = ({
@@ -88,12 +91,16 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
   onConvertToInstallment,
   onBatchSettleUnsettled,
   onOpenReceiptCapture,
+  onOpenAccountTransactions,
+  onOpenUpdateBankBalance,
+  onEditAccount,
 }) => {
   const currencyConfig = getCurrencyConfig(currency);
 
   // Filter & Search states
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
+  const [selectedAccountFilter, setSelectedAccountFilter] = useState<string>('all');
   const [selectedPaymentModeFilter, setSelectedPaymentModeFilter] = useState<string>('all');
   const [selectedRepaymentFilter, setSelectedRepaymentFilter] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
@@ -102,6 +109,7 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
   // Modals state
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
+  const [targetAccountIdForNew, setTargetAccountIdForNew] = useState<string | undefined>(undefined);
 
   const [settlingExpense, setSettlingExpense] = useState<ExpenseItem | null>(null);
   const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
@@ -184,12 +192,18 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
         return false;
       }
 
+      // Specific Account Filter
+      if (selectedAccountFilter !== 'all' && e.accountId !== selectedAccountFilter) {
+        return false;
+      }
+
       return true;
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [expenses, searchTerm, selectedTypeFilter, selectedPaymentModeFilter, selectedRepaymentFilter, selectedStatusFilter, selectedCategoryFilter]);
+  }, [expenses, searchTerm, selectedAccountFilter, selectedTypeFilter, selectedPaymentModeFilter, selectedRepaymentFilter, selectedStatusFilter, selectedCategoryFilter]);
 
   // Handle open add modal
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = (accId?: string) => {
+    setTargetAccountIdForNew(accId || (selectedAccountFilter !== 'all' ? selectedAccountFilter : undefined));
     setEditingExpense(null);
     setIsExpenseModalOpen(true);
   };
@@ -407,6 +421,20 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
             <span>Filter:</span>
           </div>
 
+          {/* Account Filter */}
+          <select
+            value={selectedAccountFilter ?? 'all'}
+            onChange={(e) => setSelectedAccountFilter(e.target.value)}
+            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer font-medium"
+          >
+            <option value="all">All Linked Accounts ({accounts.length})</option>
+            {accounts.map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.name} ({acc.type === 'credit_card' ? 'Card' : acc.type === 'ewallet_pay_later' ? 'BNPL' : 'Bank'})
+              </option>
+            ))}
+          </select>
+
           {/* Payment Method Filter */}
           <select
             value={selectedPaymentModeFilter ?? 'all'}
@@ -455,9 +483,10 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
             ))}
           </select>
 
-          {(selectedTypeFilter !== 'all' || selectedPaymentModeFilter !== 'all' || selectedRepaymentFilter !== 'all' || selectedStatusFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm) && (
+          {(selectedAccountFilter !== 'all' || selectedTypeFilter !== 'all' || selectedPaymentModeFilter !== 'all' || selectedRepaymentFilter !== 'all' || selectedStatusFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm) && (
             <button
               onClick={() => {
+                setSelectedAccountFilter('all');
                 setSelectedTypeFilter('all');
                 setSelectedPaymentModeFilter('all');
                 setSelectedRepaymentFilter('all');
@@ -472,6 +501,113 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
           )}
         </div>
       </div>
+
+      {/* Account Context Banner when filtering by specific account */}
+      {selectedAccountFilter !== 'all' && (() => {
+        const activeAcc = accounts.find((a) => a.id === selectedAccountFilter);
+        if (!activeAcc) return null;
+        const isBank = activeAcc.type === 'bank_account';
+        const isCard = activeAcc.type === 'credit_card';
+        const isBnpl = activeAcc.type === 'ewallet_pay_later';
+        const accExpenses = expenses.filter((e) => e.accountId === activeAcc.id);
+        const unsettledSum = accExpenses.filter((e) => e.status !== 'settled').reduce((sum, e) => sum + e.amount, 0);
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div 
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0 shadow"
+                style={{ backgroundColor: activeAcc.color || '#4f46e5' }}
+              >
+                {renderAccountIcon(activeAcc.type, 'w-5 h-5 text-white')}
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-white text-sm">{activeAcc.name}</span>
+                  <span 
+                    className="text-[10px] px-2 py-0.5 rounded font-semibold"
+                    style={{ backgroundColor: `${activeAcc.color}25`, color: activeAcc.color }}
+                  >
+                    {getAccountTypeLabel(activeAcc.type)}
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    {activeAcc.institution} • {activeAcc.accountNumberMask}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs mt-1">
+                  {isBank ? (
+                    <div>
+                      <span className="text-slate-400">Liquid Balance: </span>
+                      <span className="font-bold text-emerald-400 font-mono">
+                        {formatCurrency(activeAcc.totalBalance, currency)}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <span className="text-slate-400">Statement Due: </span>
+                        <span className="font-bold text-amber-400 font-mono">
+                          {formatCurrency(activeAcc.statementBalance, currency)}
+                        </span>
+                      </div>
+                      <span className="text-slate-600">•</span>
+                      <div>
+                        <span className="text-slate-400">Active Unsettled: </span>
+                        <span className="font-bold text-white font-mono">
+                          {formatCurrency(unsettledSum, currency)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {isBank && onOpenUpdateBankBalance && (
+                <button
+                  type="button"
+                  onClick={() => onOpenUpdateBankBalance(activeAcc.id)}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Update Bank Balance</span>
+                </button>
+              )}
+
+              {(isCard || isBnpl) && onOpenAccountTransactions && (
+                <button
+                  type="button"
+                  onClick={() => onOpenAccountTransactions(activeAcc)}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-500/40 text-indigo-300 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <CreditCard className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Manage Card Transactions</span>
+                </button>
+              )}
+
+              {onEditAccount && (
+                <button
+                  type="button"
+                  onClick={() => onEditAccount(activeAcc)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Edit Details
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleOpenAddModal(activeAcc.id)}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Transaction</span>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Expenses Table & Card List */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
@@ -723,6 +859,7 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
         editingExpense={editingExpense}
         accounts={accounts}
         currency={currency}
+        initialAccountId={targetAccountIdForNew}
         onSaveExpense={(data, immediateSettle, installmentSplit) => {
           if (editingExpense && editingExpense.id) {
             onUpdateExpense({
