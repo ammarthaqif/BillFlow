@@ -18,9 +18,15 @@ import {
   Trash2,
   Building2,
   Lock,
-  RefreshCw
+  RefreshCw,
+  Send,
+  KeyRound,
+  CheckCircle2,
+  UserCheck,
+  UserX,
+  HelpCircle
 } from 'lucide-react';
-import { UserProfile, UserDedicatedDatabase, FamilySyncPackage } from '../types';
+import { UserProfile, UserDedicatedDatabase, FamilySyncPackage, FamilyRole, PartnerConnectionPermissions } from '../types';
 import { UserDatabaseService } from '../services/userDatabaseService';
 
 interface FamilySyncModalProps {
@@ -30,6 +36,7 @@ interface FamilySyncModalProps {
   currentDb: UserDedicatedDatabase;
   onDatabaseUpdated: (updatedDb: UserDedicatedDatabase) => void;
   onSwitchUser: (newUser: UserProfile) => void;
+  onUserUpdated?: (updatedUser: UserProfile) => void;
 }
 
 export function FamilySyncModal({
@@ -39,8 +46,10 @@ export function FamilySyncModal({
   currentDb,
   onDatabaseUpdated,
   onSwitchUser,
+  onUserUpdated,
 }: FamilySyncModalProps) {
-  const [activeTab, setActiveTab] = useState<'export' | 'import' | 'household'>('export');
+  const [activeTab, setActiveTab] = useState<'household' | 'import' | 'export'>('household');
+  const [, setRefreshKey] = useState(0);
   
   // Export State
   const [includeAccounts, setIncludeAccounts] = useState(true);
@@ -59,28 +68,69 @@ export function FamilySyncModal({
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
   const [rectifyFeedback, setRectifyFeedback] = useState<string | null>(null);
 
+  // Partner Link & Verification State
+  const [partnerEmailInput, setPartnerEmailInput] = useState('');
+  const [partnerRoleInput, setPartnerRoleInput] = useState<FamilyRole>(
+    currentUser.familyRole === 'husband' ? 'wife' : currentUser.familyRole === 'wife' ? 'husband' : 'partner'
+  );
+  const [permShareAccounts, setPermShareAccounts] = useState(true);
+  const [permShareInstallments, setPermShareInstallments] = useState(true);
+  const [permShareExpenses, setPermShareExpenses] = useState(true);
+  const [permAllowBidirectional, setPermAllowBidirectional] = useState(true);
+  const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const [sendRequestError, setSendRequestError] = useState<string | null>(null);
+  const [sendRequestSuccess, setSendRequestSuccess] = useState<string | null>(null);
+
+  // Incoming Request Acceptance State
+  const [incomingVerificationCode, setIncomingVerificationCode] = useState('');
+  const [isVerifyingIncoming, setIsVerifyingIncoming] = useState(false);
+  const [incomingVerifyError, setIncomingVerifyError] = useState<string | null>(null);
+  const [incomingVerifySuccess, setIncomingVerifySuccess] = useState<string | null>(null);
+
+  // Instant 1-Click Partner Sync State
+  const [isInstantSyncing, setIsInstantSyncing] = useState(false);
+  const [instantSyncFeedback, setInstantSyncFeedback] = useState<string | null>(null);
+
+  // Profile Switching Security & Verification Guard State
+  const [switchTargetUser, setSwitchTargetUser] = useState<UserProfile | null>(null);
+  const [switchDeniedReason, setSwitchDeniedReason] = useState<string | null>(null);
+  const [copiedInviteText, setCopiedInviteText] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
-  // Household audit check
-  const householdAudit = UserDatabaseService.auditHouseholdAccounts(currentDb, currentUser);
-  const householdMembers = UserDatabaseService.getHouseholdMembers(currentUser);
-  const otherHouseholdGroups = UserDatabaseService.getOtherHouseholdGroups(currentUser);
+  // Fresh user resolution to catch updated partner links
+  const allRegistered = UserDatabaseService.getRegisteredUsers();
+  const activeUser = allRegistered.find((u) => u.id === currentUser.id) || currentUser;
+  const householdAudit = UserDatabaseService.auditHouseholdAccounts(currentDb, activeUser);
+  const householdMembers = UserDatabaseService.getHouseholdMembers(activeUser);
+  const incomingRequests = UserDatabaseService.getIncomingPartnerRequests(activeUser);
+  const outgoingRequests = UserDatabaseService.getOutgoingPartnerRequests(activeUser);
+  const linkedPartner = activeUser.linkedPartner;
+
+  // Potential registered spouses on this device for convenience
+  const otherSameDeviceUsers = allRegistered.filter(
+    (u) => u.id !== activeUser.id && u.email.toLowerCase() !== activeUser.email.toLowerCase()
+  );
 
   // Detect cross-household package
   const isCrossHousehold = parsedPackage ? (
-    (parsedPackage.exportedBy?.householdId && currentUser.householdId && parsedPackage.exportedBy.householdId !== currentUser.householdId) ||
-    (parsedPackage.exportedBy?.householdName && currentUser.householdName && 
-     parsedPackage.exportedBy.householdName.trim().toLowerCase() !== currentUser.householdName.trim().toLowerCase())
+    (parsedPackage.exportedBy?.householdId && activeUser.householdId && parsedPackage.exportedBy.householdId !== activeUser.householdId) ||
+    (parsedPackage.exportedBy?.householdName && activeUser.householdName && 
+     parsedPackage.exportedBy.householdName.trim().toLowerCase() !== activeUser.householdName.trim().toLowerCase())
   ) : false;
 
   // Generate Current Package
   const currentPackage = UserDatabaseService.createFamilySyncPackage(
-    currentUser,
+    activeUser,
     currentDb,
     { includeAccounts, includeInstallments, includeSettings }
   );
+
+  const refreshState = () => {
+    setRefreshKey((k) => k + 1);
+  };
 
   // Download JSON File
   const handleDownloadFile = () => {
@@ -88,7 +138,7 @@ export function FamilySyncModal({
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const safeName = currentUser.name.replace(/[^a-zA-Z0-9]/g, '_');
+    const safeName = activeUser.name.replace(/[^a-zA-Z0-9]/g, '_');
     const dateStr = new Date().toISOString().split('T')[0];
     a.href = url;
     a.download = `billflow-family-sync-${safeName}-${dateStr}.json`;
@@ -106,7 +156,6 @@ export function FamilySyncModal({
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2500);
     } catch {
-      // Fallback
       setCopiedCode(false);
     }
   };
@@ -153,7 +202,7 @@ export function FamilySyncModal({
 
     if (isCrossHousehold && !crossHouseholdOverride) {
       setImportError(
-        `Cross-Household Guard: This package is from household "${parsedPackage.exportedBy.householdName}". You are currently in "${currentUser.householdName}". To prevent accidental merging into the wrong household, check the confirmation override or switch households first.`
+        `Cross-Household Guard: This package is from household "${parsedPackage.exportedBy.householdName}". You are currently in "${activeUser.householdName}". To prevent accidental merging into the wrong household, check the confirmation override or switch households first.`
       );
       return;
     }
@@ -166,8 +215,8 @@ export function FamilySyncModal({
           mode: importMode,
           tagWithOwner,
           customOwnerTag: customTag.trim() || undefined,
-          targetHouseholdName: currentUser.householdName,
-          targetHouseholdId: currentUser.householdId,
+          targetHouseholdName: activeUser.householdName,
+          targetHouseholdId: activeUser.householdId,
           allowCrossHouseholdMerge: crossHouseholdOverride,
         }
       );
@@ -176,7 +225,7 @@ export function FamilySyncModal({
 
       setImportSuccessMessage(
         importMode === 'merge'
-          ? `Successfully synchronized! Added ${result.accountsAdded} accounts and ${result.installmentsAdded} installment plans into household "${currentUser.householdName}".`
+          ? `Successfully synchronized! Added ${result.accountsAdded} accounts and ${result.installmentsAdded} installment plans into household "${activeUser.householdName}".`
           : `Dedicated database mirrored with snapshot from ${parsedPackage.exportedBy.userName}.`
       );
       setParsedPackage(null);
@@ -199,13 +248,161 @@ export function FamilySyncModal({
 
   // Handle Adopt/Reassign All Accounts to Active Household
   const handleAdoptAll = () => {
-    const updated = UserDatabaseService.reassignAllAccountsToCurrentHousehold(currentDb, currentUser);
+    const updated = UserDatabaseService.reassignAllAccountsToCurrentHousehold(currentDb, activeUser);
     onDatabaseUpdated(updated);
-    setRectifyFeedback(`Successfully reassigned all accounts strictly to household "${currentUser.householdName}".`);
+    setRectifyFeedback(`Successfully reassigned all accounts strictly to household "${activeUser.householdName}".`);
     setTimeout(() => setRectifyFeedback(null), 4000);
   };
 
-  const registeredUsers = UserDatabaseService.getRegisteredUsers();
+  // Handle Send Partner Request
+  const handleSendPartnerRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSendRequestError(null);
+    setSendRequestSuccess(null);
+    setIsSendingRequest(true);
+
+    try {
+      const newReq = UserDatabaseService.sendPartnerConnectionRequest({
+        sender: activeUser,
+        receiverEmail: partnerEmailInput,
+        receiverRole: partnerRoleInput,
+        permissions: {
+          shareAccounts: permShareAccounts,
+          shareInstallments: permShareInstallments,
+          shareExpenses: permShareExpenses,
+          allowBidirectionalSync: permAllowBidirectional,
+        },
+      });
+
+      setSendRequestSuccess(
+        `Connection request sent! Share the 6-digit verification code (${newReq.verificationCode}) with your spouse to verify and accept.`
+      );
+      setPartnerEmailInput('');
+      refreshState();
+    } catch (err: any) {
+      setSendRequestError(err.message || 'Failed to send partner connection request.');
+    } finally {
+      setIsSendingRequest(false);
+    }
+  };
+
+  // Handle Verify & Accept Incoming Request
+  const handleVerifyAndAcceptRequest = (requestId: string) => {
+    setIncomingVerifyError(null);
+    setIncomingVerifySuccess(null);
+    setIsVerifyingIncoming(true);
+
+    try {
+      const res = UserDatabaseService.verifyAndAcceptPartnerRequest({
+        requestId,
+        verificationCode: incomingVerificationCode,
+        receiver: activeUser,
+      });
+
+      setIncomingVerifySuccess(
+        `Partner connection verified and accepted! You and ${res.senderUser.name} (${res.senderUser.familyRole}) are now linked.`
+      );
+      setIncomingVerificationCode('');
+      if (onUserUpdated) {
+        onUserUpdated(res.receiverUser);
+      }
+      refreshState();
+    } catch (err: any) {
+      setIncomingVerifyError(err.message || 'Verification failed. Please check the 6-digit code.');
+    } finally {
+      setIsVerifyingIncoming(false);
+    }
+  };
+
+  // Handle Decline Incoming Request
+  const handleDeclineRequest = (requestId: string) => {
+    try {
+      UserDatabaseService.rejectPartnerRequest(requestId, activeUser);
+      refreshState();
+    } catch (err: any) {
+      setIncomingVerifyError(err.message || 'Failed to decline request.');
+    }
+  };
+
+  // Handle Cancel Outgoing Request
+  const handleCancelOutgoing = (requestId: string) => {
+    try {
+      UserDatabaseService.cancelPartnerRequest(requestId, activeUser);
+      refreshState();
+    } catch (err: any) {
+      setSendRequestError(err.message || 'Failed to cancel request.');
+    }
+  };
+
+  // Handle Disconnect Partner
+  const handleDisconnectPartner = () => {
+    if (!window.confirm('Are you sure you want to disconnect your verified partner? This will sever data synchronization and profile switching until a new dual-party request is verified.')) {
+      return;
+    }
+
+    try {
+      const res = UserDatabaseService.disconnectPartner(activeUser.id);
+      if (onUserUpdated) {
+        onUserUpdated(res.currentUser);
+      }
+      refreshState();
+      setRectifyFeedback('Partner connection has been disconnected.');
+      setTimeout(() => setRectifyFeedback(null), 4000);
+    } catch (err: any) {
+      alert(err.message || 'Failed to disconnect partner.');
+    }
+  };
+
+  // Handle 1-Click Instant Partner Sync
+  const handleInstantPartnerSync = () => {
+    if (!linkedPartner || linkedPartner.status !== 'verified') return;
+    setIsInstantSyncing(true);
+    setInstantSyncFeedback(null);
+
+    try {
+      const res = UserDatabaseService.syncVerifiedPartnerData(activeUser.id, linkedPartner.partnerUserId);
+      onDatabaseUpdated(res.updatedDb);
+      setInstantSyncFeedback(
+        `Synchronized with ${linkedPartner.partnerName}! Added ${res.accountsAdded} account(s) and ${res.installmentsAdded} installment plan(s).`
+      );
+      refreshState();
+      setTimeout(() => setInstantSyncFeedback(null), 5000);
+    } catch (err: any) {
+      setInstantSyncFeedback(`Sync failed: ${err.message}`);
+    } finally {
+      setIsInstantSyncing(false);
+    }
+  };
+
+  // Handle Request Profile Switch
+  const handleAttemptSwitch = (targetUser: UserProfile) => {
+    setSwitchDeniedReason(null);
+    const check = UserDatabaseService.canSwitchToUser(activeUser, targetUser.id);
+    if (!check.allowed) {
+      setSwitchDeniedReason(check.reason || 'Switching to this profile is prohibited.');
+      return;
+    }
+    setSwitchTargetUser(targetUser);
+  };
+
+  // Confirm Switch
+  const handleConfirmSwitch = () => {
+    if (!switchTargetUser) return;
+    onSwitchUser(switchTargetUser);
+    onClose();
+  };
+
+  // Copy Verification Invite Text
+  const handleCopyInviteMessage = async (code: string, receiverEmail: string) => {
+    const inviteText = `Hi darling! I have sent you a connection request on BillFlow to sync our household finances. Your 6-digit verification code is: ${code}. Please open Family Sync on your account (${receiverEmail}) and enter this code to verify and connect our accounts.`;
+    try {
+      await navigator.clipboard.writeText(inviteText);
+      setCopiedInviteText(true);
+      setTimeout(() => setCopiedInviteText(false), 2500);
+    } catch {
+      setCopiedInviteText(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -218,16 +415,16 @@ export function FamilySyncModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white">Family Data Sync Center</h2>
+                <h2 className="text-base font-bold text-white">Family Data Sync & Partner Link</h2>
                 <span className="text-[10px] font-semibold bg-indigo-950/70 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full capitalize">
-                  {currentUser.familyRole}
+                  {activeUser.familyRole}
                 </span>
                 <span className="text-[10px] font-semibold bg-emerald-950/70 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded-full">
-                  {currentUser.householdName}
+                  {activeUser.householdName}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Synchronize and share debt schedules strictly within your verified household.
+                Verified dual-party synchronization and strict household isolation.
               </p>
             </div>
           </div>
@@ -248,8 +445,8 @@ export function FamilySyncModal({
                 <div className="font-bold text-rose-200">
                   Cross-Household Account Contamination Detected!
                 </div>
-                <div className="text-rose-300/90 text-[11px] mt-0.5">
-                  Found {householdAudit.foreignAccounts.length} account(s) ({householdAudit.foreignAccounts.map(a => (a as any).bank || a.name).join(', ')}) belonging to another household or external profile.
+                <div className="text-rose-300/80 text-[11px] mt-0.5">
+                  {householdAudit.foreignAccounts.length} account(s) belong to foreign households.
                 </div>
               </div>
             </div>
@@ -257,18 +454,18 @@ export function FamilySyncModal({
               <button
                 type="button"
                 onClick={handlePurgeForeign}
-                className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                className="px-2.5 py-1.5 rounded-lg border border-rose-700/60 bg-rose-900/60 hover:bg-rose-800 text-rose-100 font-semibold text-[11px] transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Trash2 className="w-3.5 h-3.5 text-rose-300" />
                 <span>Purge Foreign</span>
               </button>
               <button
                 type="button"
                 onClick={handleAdoptAll}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-[11px] transition-colors flex items-center gap-1.5 cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Adopt to My Household</span>
+                <span>Adopt to Household</span>
               </button>
             </div>
           </div>
@@ -284,15 +481,18 @@ export function FamilySyncModal({
         {/* Tabs Bar */}
         <div className="px-5 pt-3 pb-0 border-b border-slate-800/80 bg-slate-900/50 flex gap-2">
           <button
-            onClick={() => setActiveTab('export')}
+            onClick={() => setActiveTab('household')}
             className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
-              activeTab === 'export'
+              activeTab === 'household'
                 ? 'border-indigo-500 text-indigo-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Download className="w-4 h-4" />
-            <span>Export My Data</span>
+            <Users className="w-4 h-4" />
+            <span>Household & Partner Link</span>
+            {incomingRequests.length > 0 && (
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+            )}
           </button>
           <button
             onClick={() => setActiveTab('import')}
@@ -303,341 +503,360 @@ export function FamilySyncModal({
             }`}
           >
             <Upload className="w-4 h-4" />
-            <span>Import & Sync Partner Data</span>
+            <span>Sync & Import Data</span>
           </button>
           <button
-            onClick={() => setActiveTab('household')}
+            onClick={() => setActiveTab('export')}
             className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
-              activeTab === 'household'
+              activeTab === 'export'
                 ? 'border-indigo-500 text-indigo-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Users className="w-4 h-4" />
-            <span>Household Profiles ({householdMembers.length})</span>
+            <Download className="w-4 h-4" />
+            <span>Export Snapshot</span>
           </button>
         </div>
 
-        {/* Modal Content Body */}
-        <div className="p-5 overflow-y-auto space-y-4 text-xs">
-          {/* TAB 1: EXPORT */}
-          {activeTab === 'export' && (
-            <div className="space-y-4">
-              {/* Database Context Box */}
-              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Database className="w-4 h-4 text-indigo-400" />
-                    <span className="font-semibold text-white">Source Dedicated Database:</span>
-                  </div>
-                  <span className="font-mono text-[11px] text-indigo-300 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-800/40">
-                    {currentUser.databaseId}
-                  </span>
-                </div>
-                <div className="text-slate-400 text-[11px]">
-                  Logged in as <strong className="text-slate-200">{currentUser.name}</strong> ({currentUser.familyRole}) • {currentUser.householdName}
-                </div>
-              </div>
-
-              {/* Package contents summary */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                <div className="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
-                  <div className="text-slate-400 text-[10px]">Cards & E-Wallets</div>
-                  <div className="text-base font-bold text-white mt-0.5">{currentDb.accounts.length}</div>
-                </div>
-                <div className="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
-                  <div className="text-slate-400 text-[10px]">Installments</div>
-                  <div className="text-base font-bold text-white mt-0.5">{currentDb.installments.length}</div>
-                </div>
-                <div className="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
-                  <div className="text-slate-400 text-[10px]">Total Statement Due</div>
-                  <div className="text-base font-bold text-amber-400 mt-0.5">
-                    ${currentDb.accounts.reduce((sum, a) => sum + a.statementBalance, 0).toFixed(2)}
-                  </div>
-                </div>
-                <div className="bg-slate-800/40 border border-slate-800 p-2.5 rounded-xl">
-                  <div className="text-slate-400 text-[10px]">Monthly BNPL</div>
-                  <div className="text-base font-bold text-emerald-400 mt-0.5">
-                    ${currentDb.installments.reduce((sum, i) => sum + i.monthlyAmount, 0).toFixed(2)}
-                  </div>
-                </div>
-              </div>
-
-              {/* What to include */}
-              <div className="space-y-2">
-                <span className="font-semibold text-slate-300 block">Export Options:</span>
-                <div className="space-y-1.5">
-                  <label className="flex items-center gap-2.5 p-2 bg-slate-950/40 rounded-lg border border-slate-800/60 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeAccounts}
-                      onChange={(e) => setIncludeAccounts(e.target.checked)}
-                      className="rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-0"
-                    />
-                    <span className="text-slate-200">Include all revolving accounts ({currentDb.accounts.length})</span>
-                  </label>
-                  <label className="flex items-center gap-2.5 p-2 bg-slate-950/40 rounded-lg border border-slate-800/60 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeInstallments}
-                      onChange={(e) => setIncludeInstallments(e.target.checked)}
-                      className="rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-0"
-                    />
-                    <span className="text-slate-200">Include active multi-month installment plans ({currentDb.installments.length})</span>
-                  </label>
-                  <label className="flex items-center gap-2.5 p-2 bg-slate-950/40 rounded-lg border border-slate-800/60 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeSettings}
-                      onChange={(e) => setIncludeSettings(e.target.checked)}
-                      className="rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-0"
-                    />
-                    <span className="text-slate-200">Include strategy preferences & paycheck schedule</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleDownloadFile}
-                  className="py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Family Sync (.json)</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCopyCode}
-                  className="py-3 px-4 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-white font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {copiedCode ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-400" />
-                      <span className="text-emerald-300">Copied to Clipboard!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4 text-slate-400" />
-                      <span>Copy Sync Payload Code</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="p-3 bg-indigo-950/30 border border-indigo-900/40 rounded-xl text-[11px] text-slate-400 flex items-start gap-2">
-                <HeartHandshake className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Tip for Couples:</strong> Send this JSON file or sync code to your spouse (e.g. via WhatsApp or email). They can import it into their account to see the unified household payment sequence.
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: IMPORT */}
-          {activeTab === 'import' && (
-            <div className="space-y-4">
-              {importSuccessMessage && (
-                <div className="p-3.5 bg-emerald-950/50 border border-emerald-800/70 rounded-xl text-emerald-300 flex items-center gap-2.5">
-                  <Check className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <span className="font-medium">{importSuccessMessage}</span>
-                </div>
-              )}
-
-              {importError && (
-                <div className="p-3 bg-rose-950/40 border border-rose-800/60 rounded-xl text-rose-300 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>{importError}</span>
-                </div>
-              )}
-
-              {/* Upload Drop Area */}
-              <div 
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-700 hover:border-indigo-500 bg-slate-950/40 hover:bg-indigo-950/10 rounded-2xl p-5 text-center cursor-pointer transition-all space-y-2"
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-indigo-400">
-                  <Upload className="w-5 h-5" />
-                </div>
-                <div className="font-semibold text-white">Click or drag & drop family sync file here</div>
-                <div className="text-[11px] text-slate-500">Supports .json sync files generated by BillFlow</div>
-              </div>
-
-              {/* Or paste JSON code */}
-              <div className="space-y-1.5">
-                <label className="block text-slate-300 font-semibold">Or paste sync code / JSON text:</label>
-                <textarea
-                  value={importInputText}
-                  onChange={(e) => {
-                    setImportInputText(e.target.value);
-                    if (e.target.value.trim()) {
-                      handleParseContent(e.target.value);
-                    } else {
-                      setParsedPackage(null);
-                    }
-                  }}
-                  rows={3}
-                  placeholder='Paste the { "format": "billflow-family-sync", ... } payload here'
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white placeholder-slate-600 font-mono text-[11px] focus:outline-none focus:border-indigo-500 transition-colors"
-                />
-              </div>
-
-              {/* Parsed Package Preview */}
-              {parsedPackage && (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-emerald-400" />
-                      <span className="font-bold text-white">Verified Family Sync Package</span>
-                    </div>
-                    <span className="text-[11px] text-slate-400">
-                      Exported {new Date(parsedPackage.exportedAt).toLocaleDateString()}
-                    </span>
-                  </div>
-
-                  {/* Cross-Household Isolation Warning */}
-                  {isCrossHousehold && (
-                    <div className="p-3 bg-amber-950/40 border border-amber-800/70 rounded-xl space-y-2">
-                      <div className="flex items-start gap-2 text-amber-300 font-bold text-xs">
-                        <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <span>Cross-Household Isolation Guard Active</span>
-                      </div>
-                      <p className="text-[11px] text-amber-200/90 leading-relaxed">
-                        This package was exported from household <strong>"{parsedPackage.exportedBy.householdName}"</strong> by {parsedPackage.exportedBy.userName}. Your active database belongs to <strong>"{currentUser.householdName}"</strong>.
-                      </p>
-                      <label className="flex items-center gap-2 pt-1 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={crossHouseholdOverride}
-                          onChange={(e) => setCrossHouseholdOverride(e.target.checked)}
-                          className="rounded border-amber-600 text-amber-500 focus:ring-amber-400"
-                        />
-                        <span className="text-[11px] text-amber-300 font-medium">
-                          I explicitly authorize merging this package into "{currentUser.householdName}"
-                        </span>
-                      </label>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="p-2 bg-slate-900 rounded-lg">
-                      <span className="text-slate-400 block">Sender / Partner:</span>
-                      <strong className="text-white">
-                        {parsedPackage.exportedBy.userName} ({parsedPackage.exportedBy.familyRole})
-                      </strong>
-                    </div>
-                    <div className="p-2 bg-slate-900 rounded-lg">
-                      <span className="text-slate-400 block">Package Household:</span>
-                      <strong className={isCrossHousehold ? 'text-amber-300 font-bold' : 'text-emerald-300 font-bold'}>
-                        {parsedPackage.exportedBy.householdName}
-                      </strong>
-                    </div>
-                    <div className="p-2 bg-slate-900 rounded-lg">
-                      <span className="text-slate-400 block">Accounts to Sync:</span>
-                      <strong className="text-indigo-300">{parsedPackage.data.accounts.length} items</strong>
-                    </div>
-                    <div className="p-2 bg-slate-900 rounded-lg">
-                      <span className="text-slate-400 block">Installments to Sync:</span>
-                      <strong className="text-emerald-300">{parsedPackage.data.installments.length} plans</strong>
-                    </div>
-                  </div>
-
-                  {/* Sync Mode Selection */}
-                  <div className="space-y-2 pt-1 border-t border-slate-800">
-                    <span className="font-semibold text-slate-300 block">Synchronization Mode:</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setImportMode('merge')}
-                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
-                          importMode === 'merge'
-                            ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
-                            : 'border-slate-800 bg-slate-900 text-slate-400'
-                        }`}
-                      >
-                        <div className="font-bold">Merge with My Accounts</div>
-                        <div className="text-[10px] text-slate-400">
-                          Adds partner's cards to your view so both can be optimized together.
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setImportMode('replace')}
-                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
-                          importMode === 'replace'
-                            ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
-                            : 'border-slate-800 bg-slate-900 text-slate-400'
-                        }`}
-                      >
-                        <div className="font-bold">Mirror / Overwrite</div>
-                        <div className="text-[10px] text-slate-400">
-                          Replaces current database with this snapshot.
-                        </div>
-                      </button>
-                    </div>
-
-                    {importMode === 'merge' && (
-                      <div className="pt-2 flex items-center gap-2">
-                        <label className="text-slate-400">Tag Imported Items As:</label>
-                        <input
-                          type="text"
-                          value={customTag}
-                          onChange={(e) => setCustomTag(e.target.value)}
-                          className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white font-medium text-xs"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Execute Button */}
-                  <button
-                    type="button"
-                    onClick={handleExecuteImport}
-                    disabled={isCrossHousehold && !crossHouseholdOverride}
-                    className={`w-full py-2.5 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 shadow-lg ${
-                      isCrossHousehold && !crossHouseholdOverride
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 cursor-pointer'
-                    }`}
-                  >
-                    <ArrowRightLeft className="w-4 h-4" />
-                    <span>
-                      {isCrossHousehold && !crossHouseholdOverride
-                        ? 'Cross-Household Sync Blocked (Check Override Above)'
-                        : `Apply & Save to Household "${currentUser.householdName}"`}
-                    </span>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 3: HOUSEHOLD PROFILES */}
+        {/* Tab Content */}
+        <div className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
+          
+          {/* TAB 1: HOUSEHOLD PROFILES & PARTNER LINK (PRIMARY) */}
           {activeTab === 'household' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="text-slate-400 text-[11px]">
-                  Members of household: <strong className="text-white">{currentUser.householdName}</strong>
+            <div className="space-y-5">
+              
+              {/* Household Scope Header */}
+              <div className="flex items-center justify-between bg-slate-950/40 p-3 rounded-xl border border-slate-800/80">
+                <div className="flex items-center gap-2.5">
+                  <Building2 className="w-4 h-4 text-indigo-400" />
+                  <div>
+                    <span className="text-slate-400 text-[11px]">Active Household: </span>
+                    <strong className="text-white font-semibold">{activeUser.householdName}</strong>
+                  </div>
                 </div>
                 <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-800/40">
-                  ID: {currentUser.householdId}
+                  ID: {activeUser.householdId}
                 </span>
               </div>
 
-              {/* Current Household Members */}
-              <div className="space-y-2">
+              {/* INCOMING PARTNER REQUEST BANNER */}
+              {incomingRequests.length > 0 && (
+                <div className="bg-amber-950/40 border border-amber-500/50 rounded-xl p-4 space-y-3 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                      <KeyRound className="w-4 h-4 text-amber-400" />
+                      <span>Incoming Partner Connection Request</span>
+                    </div>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-semibold px-2 py-0.5 rounded-full border border-amber-500/30">
+                      Requires 6-Digit PIN
+                    </span>
+                  </div>
+
+                  {incomingRequests.map((req) => (
+                    <div key={req.id} className="space-y-3 pt-1">
+                      <p className="text-slate-300 text-[11px] leading-relaxed">
+                        <strong className="text-white font-semibold">{req.senderName}</strong> ({req.senderRole} • {req.senderEmail}) wants to link accounts and synchronize household debt schedules with you.
+                      </p>
+
+                      <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-3 space-y-2">
+                        <div className="text-[11px] text-slate-400 font-medium flex items-center justify-between">
+                          <span>Enter the 6-digit verification PIN provided by your spouse:</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            maxLength={6}
+                            value={incomingVerificationCode}
+                            onChange={(e) => setIncomingVerificationCode(e.target.value.replace(/[^0-9]/g, ''))}
+                            placeholder="e.g. 582914"
+                            className="bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-white font-mono text-sm tracking-widest text-center w-36 outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={incomingVerificationCode.length !== 6 || isVerifyingIncoming}
+                            onClick={() => handleVerifyAndAcceptRequest(req.id)}
+                            className="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:pointer-events-none text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Verify Code & Accept Connection</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeclineRequest(req.id)}
+                            className="py-2 px-3 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition-colors cursor-pointer"
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {incomingVerifyError && (
+                    <div className="text-rose-400 text-[11px] flex items-center gap-1.5 bg-rose-950/40 p-2 rounded-lg border border-rose-900/50">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{incomingVerifyError}</span>
+                    </div>
+                  )}
+
+                  {incomingVerifySuccess && (
+                    <div className="text-emerald-400 text-[11px] flex items-center gap-1.5 bg-emerald-950/40 p-2 rounded-lg border border-emerald-900/50">
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                      <span>{incomingVerifySuccess}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* OUTGOING PENDING REQUEST BANNER */}
+              {outgoingRequests.length > 0 && !linkedPartner && (
+                <div className="bg-indigo-950/30 border border-indigo-500/40 rounded-xl p-4 space-y-3 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-indigo-300 font-bold text-xs">
+                      <Send className="w-4 h-4 text-indigo-400" />
+                      <span>Pending Spouse Verification & Acceptance</span>
+                    </div>
+                    <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-semibold px-2 py-0.5 rounded-full border border-indigo-500/30">
+                      Outgoing Invite
+                    </span>
+                  </div>
+
+                  {outgoingRequests.map((req) => (
+                    <div key={req.id} className="space-y-3">
+                      <p className="text-slate-300 text-[11px]">
+                        Invitation sent to <strong className="text-white">{req.receiverEmail}</strong>. Provide your spouse the 6-digit verification PIN below:
+                      </p>
+
+                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">
+                            Verification PIN Code
+                          </div>
+                          <div className="font-mono text-2xl font-black text-amber-300 tracking-[0.25em] mt-0.5">
+                            {req.verificationCode}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyInviteMessage(req.verificationCode, req.receiverEmail)}
+                            className="flex-1 sm:flex-none py-1.5 px-3 rounded-lg border border-indigo-500/40 bg-indigo-900/40 hover:bg-indigo-800 text-indigo-200 font-semibold text-[11px] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>{copiedInviteText ? 'Copied Message!' : 'Copy Invite'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelOutgoing(req.id)}
+                            className="py-1.5 px-3 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 font-semibold text-[11px] transition-colors cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                        <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Your spouse must log into their BillFlow account and enter this PIN to verify mutual consent.</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* DUAL-PARTY VERIFIED PARTNER ACTIVE CARD */}
+              {linkedPartner && linkedPartner.status === 'verified' ? (
+                <div className="bg-emerald-950/30 border border-emerald-500/40 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                        <ShieldCheck className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-white font-bold text-xs flex items-center gap-1.5">
+                          <span>Verified Partner Connection</span>
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.2 rounded border border-emerald-500/30">
+                            Dual-Verified
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Linked with <strong className="text-white">{linkedPartner.partnerName}</strong> ({linkedPartner.partnerRole} • {linkedPartner.partnerEmail})
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleDisconnectPartner}
+                      className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold hover:underline cursor-pointer"
+                    >
+                      Disconnect Partner
+                    </button>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px]">
+                    <div className="text-slate-400">
+                      Last Synchronized: <span className="text-slate-200 font-medium">{linkedPartner.lastSyncedAt ? new Date(linkedPartner.lastSyncedAt).toLocaleString() : 'Never'}</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isInstantSyncing}
+                      onClick={handleInstantPartnerSync}
+                      className="py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isInstantSyncing ? 'animate-spin' : ''}`} />
+                      <span>1-Click Sync with {linkedPartner.partnerName}</span>
+                    </button>
+                  </div>
+
+                  {instantSyncFeedback && (
+                    <div className="bg-slate-900 border border-slate-700 p-2 rounded-lg text-[11px] text-emerald-300 font-medium">
+                      {instantSyncFeedback}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* INITIATE CONNECTION REQUEST FORM IF NOT LINKED */
+                (!outgoingRequests.length && (
+                  <form onSubmit={handleSendPartnerRequest} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <HeartHandshake className="w-4 h-4 text-indigo-400" />
+                      <span className="font-bold text-white text-xs">Connect Spouse Account (Dual-Party Verification)</span>
+                    </div>
+                    <p className="text-slate-400 text-[11px] leading-relaxed">
+                      For financial privacy, viewing another account or syncing debt schedules requires verification and mutual acceptance from both spouses.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1">
+                        <label className="text-slate-300 text-[10px] font-semibold">Spouse / Partner Email</label>
+                        <input
+                          type="email"
+                          required
+                          value={partnerEmailInput}
+                          onChange={(e) => setPartnerEmailInput(e.target.value)}
+                          placeholder="e.g. spouse@family.com"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-slate-300 text-[10px] font-semibold">Partner Role</label>
+                        <select
+                          value={partnerRoleInput}
+                          onChange={(e) => setPartnerRoleInput(e.target.value as FamilyRole)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-indigo-500 cursor-pointer"
+                        >
+                          <option value="wife">Wife</option>
+                          <option value="husband">Husband</option>
+                          <option value="partner">Partner</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Quick-select registered accounts on this device */}
+                    {otherSameDeviceUsers.length > 0 && (
+                      <div className="flex items-center gap-2 text-[10px] text-slate-400 pt-1 flex-wrap">
+                        <span>Registered on this device:</span>
+                        {otherSameDeviceUsers.map((u) => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => {
+                              setPartnerEmailInput(u.email);
+                              setPartnerRoleInput(u.familyRole);
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition-colors cursor-pointer"
+                          >
+                            {u.name} ({u.familyRole})
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Permissions */}
+                    <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                      <span className="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">Sync Permissions Requested</span>
+                      <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={permShareAccounts}
+                            onChange={(e) => setPermShareAccounts(e.target.checked)}
+                            className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                          />
+                          <span>Revolving Cards & BNPL</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={permShareInstallments}
+                            onChange={(e) => setPermShareInstallments(e.target.checked)}
+                            className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                          />
+                          <span>Installment Plans</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={permShareExpenses}
+                            onChange={(e) => setPermShareExpenses(e.target.checked)}
+                            className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                          />
+                          <span>Household Swipes & Bills</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={permAllowBidirectional}
+                            onChange={(e) => setPermAllowBidirectional(e.target.checked)}
+                            className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                          />
+                          <span>Bi-directional Sync</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {sendRequestError && (
+                      <div className="text-rose-400 text-[11px] flex items-center gap-1.5 bg-rose-950/40 p-2 rounded-lg border border-rose-900/50">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>{sendRequestError}</span>
+                      </div>
+                    )}
+
+                    {sendRequestSuccess && (
+                      <div className="text-emerald-400 text-[11px] flex items-center gap-1.5 bg-emerald-950/40 p-2 rounded-lg border border-emerald-900/50">
+                        <Check className="w-3.5 h-3.5 shrink-0" />
+                        <span>{sendRequestSuccess}</span>
+                      </div>
+                    )}
+
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={isSendingRequest || !partnerEmailInput}
+                        className="py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{isSendingRequest ? 'Generating Invite...' : 'Generate 6-Digit PIN & Send Request'}</span>
+                      </button>
+                    </div>
+                  </form>
+                ))
+              )}
+
+              {/* HOUSEHOLD MEMBERS LISTING & CONTROLLED SWITCHING */}
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                  <span className="font-semibold text-slate-300">Household Members</span>
+                  <span>{householdMembers.length} profile(s)</span>
+                </div>
+
                 {householdMembers.map((user) => {
-                  const isActive = user.id === currentUser.id;
+                  const isActive = user.id === activeUser.id;
+                  const isPartner = linkedPartner?.status === 'verified' && linkedPartner.partnerUserId === user.id;
                   const isHusband = user.familyRole === 'husband';
 
                   return (
@@ -661,9 +880,19 @@ export function FamilySyncModal({
                             <span className="text-[10px] px-2 py-0.5 rounded-full capitalize font-semibold bg-slate-800 text-slate-300">
                               {user.familyRole}
                             </span>
-                            {isActive && (
+                            {isActive ? (
                               <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded-full font-bold">
                                 Current Active
+                              </span>
+                            ) : isPartner ? (
+                              <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800/60 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                                <span>Verified Partner</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>Unverified</span>
                               </span>
                             )}
                           </div>
@@ -674,17 +903,23 @@ export function FamilySyncModal({
                       </div>
 
                       {!isActive ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onSwitchUser(user);
-                            onClose();
-                          }}
-                          className="py-1.5 px-3 rounded-lg border border-slate-700 hover:border-indigo-500 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <span>Switch to {user.familyRole}</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {isPartner ? (
+                            <button
+                              type="button"
+                              onClick={() => handleAttemptSwitch(user)}
+                              className="py-1.5 px-3 rounded-lg border border-indigo-500/60 hover:border-indigo-400 bg-indigo-900/40 hover:bg-indigo-800 text-indigo-200 font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span>Switch to {user.familyRole}</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 bg-slate-900/60 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                              <Lock className="w-3 h-3 text-slate-500" />
+                              <span>Verification Required to Switch</span>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <div className="text-emerald-400 flex items-center gap-1 font-semibold text-xs">
                           <Check className="w-4 h-4" />
@@ -696,54 +931,287 @@ export function FamilySyncModal({
                 })}
               </div>
 
-              {/* Other Households if any exist */}
-              {otherHouseholdGroups.length > 0 && (
-                <div className="pt-3 border-t border-slate-800 space-y-3">
-                  <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold">
-                    <Building2 className="w-4 h-4 text-slate-500" />
-                    <span>Other Registered Households ({otherHouseholdGroups.length})</span>
-                  </div>
+              {/* Strict Privacy & Household Isolation Notice */}
+              <div className="p-3 bg-slate-950/40 border border-slate-800/60 rounded-xl flex items-start gap-2 text-[11px] text-slate-400">
+                <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong className="text-slate-300">Strict Household Privacy: </strong>
+                  Profiles from other registered households are completely hidden from view. Switching across households is disallowed. To access an account from another household, please log out and sign in with authorized credentials.
+                </div>
+              </div>
 
-                  {otherHouseholdGroups.map((group) => (
-                    <div key={group.householdId} className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 space-y-2">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-bold text-slate-300">{group.householdName}</span>
-                        <span className="text-slate-500 font-mono text-[10px]">ID: {group.householdId}</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {group.members.map((otherUser) => (
-                          <div key={otherUser.id} className="flex items-center justify-between py-1 px-2 rounded-lg bg-slate-900/50 text-[11px]">
-                            <div className="flex items-center gap-2 text-slate-300">
-                              <Lock className="w-3 h-3 text-slate-500" />
-                              <span>{otherUser.name}</span>
-                              <span className="text-[10px] text-slate-500">({otherUser.familyRole})</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onSwitchUser(otherUser);
-                                onClose();
-                              }}
-                              className="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
-                            >
-                              Switch Household & Profile →
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+              {switchDeniedReason && (
+                <div className="text-rose-400 text-[11px] flex items-center gap-1.5 bg-rose-950/60 p-3 rounded-xl border border-rose-800">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{switchDeniedReason}</span>
                 </div>
               )}
             </div>
           )}
+
+          {/* TAB 2: IMPORT & SYNC PARTNER DATA */}
+          {activeTab === 'import' && (
+            <div className="space-y-4">
+              
+              {/* If Verified Partner Linked, Feature 1-Click Sync */}
+              {linkedPartner && linkedPartner.status === 'verified' && (
+                <div className="bg-gradient-to-br from-indigo-950/40 to-slate-900 border border-indigo-500/30 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <HeartHandshake className="w-4 h-4 text-indigo-400" />
+                      <span className="font-bold text-white text-xs">Verified Partner Direct Synchronization</span>
+                    </div>
+                    <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-semibold px-2 py-0.5 rounded-full border border-indigo-500/30">
+                      1-Click Verified
+                    </span>
+                  </div>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    Pull and harmonize the latest credit cards, BNPL plans, and debt schedules directly from <strong className="text-white">{linkedPartner.partnerName}</strong> ({linkedPartner.partnerRole}) into your dedicated database.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={isInstantSyncing}
+                    onClick={handleInstantPartnerSync}
+                    className="w-full py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-indigo-600/20"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isInstantSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isInstantSyncing ? 'Synchronizing Databases...' : `Direct Sync with ${linkedPartner.partnerName}`}</span>
+                  </button>
+                  {instantSyncFeedback && (
+                    <div className="text-[11px] text-emerald-400 font-medium bg-emerald-950/40 p-2 rounded-lg border border-emerald-900/50">
+                      {instantSyncFeedback}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Offline / Cross-Device File & Code Sync Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-300 text-xs">Cross-Device Offline Sync Package (JSON)</span>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer flex items-center gap-1"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload JSON File</span>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+                </div>
+
+                <textarea
+                  value={importInputText}
+                  onChange={(e) => {
+                    setImportInputText(e.target.value);
+                    if (e.target.value.trim()) {
+                      handleParseContent(e.target.value);
+                    } else {
+                      setParsedPackage(null);
+                    }
+                  }}
+                  rows={4}
+                  placeholder="Paste BillFlow sync code or drag & drop family sync JSON here..."
+                  className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono text-[11px] outline-none focus:border-indigo-500 transition-colors"
+                />
+              </div>
+
+              {importError && (
+                <div className="text-rose-400 text-[11px] flex items-start gap-1.5 bg-rose-950/40 p-2.5 rounded-lg border border-rose-900/50">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              {importSuccessMessage && (
+                <div className="text-emerald-400 text-[11px] flex items-center gap-1.5 bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-900/50">
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>{importSuccessMessage}</span>
+                </div>
+              )}
+
+              {parsedPackage && (
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white text-xs">Package Preview</span>
+                    <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono">
+                      Checksum: {parsedPackage.checksum}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300 bg-slate-900/80 p-3 rounded-lg border border-slate-800/80">
+                    <div>
+                      <span className="text-slate-500">From: </span>
+                      <strong className="text-white">{parsedPackage.exportedBy.userName}</strong> ({parsedPackage.exportedBy.familyRole})
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Household: </span>
+                      <strong className="text-white">{parsedPackage.exportedBy.householdName}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Accounts: </span>
+                      <strong className="text-white">{parsedPackage.payload.accounts?.length || 0}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Installments: </span>
+                      <strong className="text-white">{parsedPackage.payload.installments?.length || 0}</strong>
+                    </div>
+                  </div>
+
+                  {isCrossHousehold && (
+                    <label className="flex items-start gap-2 cursor-pointer p-2 rounded-lg bg-amber-950/40 border border-amber-900/50 text-[11px] text-amber-300">
+                      <input
+                        type="checkbox"
+                        checked={crossHouseholdOverride}
+                        onChange={(e) => setCrossHouseholdOverride(e.target.checked)}
+                        className="mt-0.5 rounded border-amber-700 text-amber-600 focus:ring-0"
+                      />
+                      <span>I confirm I want to merge data from household "{parsedPackage.exportedBy.householdName}" into "{activeUser.householdName}".</span>
+                    </label>
+                  )}
+
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="importMode"
+                          value="merge"
+                          checked={importMode === 'merge'}
+                          onChange={() => setImportMode('merge')}
+                          className="text-indigo-600"
+                        />
+                        <span>Merge Safely</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="importMode"
+                          value="replace"
+                          checked={importMode === 'replace'}
+                          onChange={() => setImportMode('replace')}
+                          className="text-indigo-600"
+                        />
+                        <span>Replace Existing</span>
+                      </label>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleExecuteImport}
+                      className="py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Complete Import</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: EXPORT SNAPSHOT */}
+          {activeTab === 'export' && (
+            <div className="space-y-4">
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Export an encrypted, checksum-verified JSON package of your dedicated database. Your spouse can import this file or code to sync debt schedules.
+              </p>
+
+              <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+                <span className="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">Include in Export</span>
+                <div className="space-y-2 text-slate-300">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span>Revolving Accounts ({currentDb.accounts.length})</span>
+                    <input
+                      type="checkbox"
+                      checked={includeAccounts}
+                      onChange={(e) => setIncludeAccounts(e.target.checked)}
+                      className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span>Active Installment Plans ({currentDb.installments.length})</span>
+                    <input
+                      type="checkbox"
+                      checked={includeInstallments}
+                      onChange={(e) => setIncludeInstallments(e.target.checked)}
+                      className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span>Income, Budget & Strategy Preferences</span>
+                    <input
+                      type="checkbox"
+                      checked={includeSettings}
+                      onChange={(e) => setIncludeSettings(e.target.checked)}
+                      className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleDownloadFile}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download .json File</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyCode}
+                  className="py-2.5 px-4 rounded-xl border border-slate-700 hover:border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors flex items-center gap-2 cursor-pointer"
+                >
+                  <Copy className="w-4 h-4" />
+                  <span>{copiedCode ? 'Copied to Clipboard!' : 'Copy Code'}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* PROFILE SWITCH CONFIRMATION MODAL */}
+        {switchTargetUser && (
+          <div className="p-4 bg-indigo-950/90 border-t border-indigo-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-indigo-200">
+              <UserCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+              <div>
+                <span className="font-bold text-white">Switch to verified spouse profile: </span>
+                <span>{switchTargetUser.name} ({switchTargetUser.familyRole})?</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSwitchTargetUser(null)}
+                className="py-1.5 px-3 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white font-semibold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSwitch}
+                className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors cursor-pointer"
+              >
+                Confirm Switch
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Modal Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-[11px] text-slate-500">
           <div className="flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Encrypted format with checksum validation</span>
+            <span>Dual-party mutual verification & strict household boundary protection</span>
           </div>
           <button
             onClick={onClose}

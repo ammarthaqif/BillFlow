@@ -8,7 +8,8 @@ import {
   ShieldCheck,
   ChevronRight,
   Layers,
-  Zap
+  Zap,
+  Gift
 } from 'lucide-react';
 import { 
   BillAccount, 
@@ -16,22 +17,25 @@ import {
   PaymentStrategyType, 
   InstallmentPlan, 
   MonthlyCashFlowProjection,
-  UserSettings 
+  UserSettings,
+  ExpenseItem 
 } from '../types';
 import { CurrencyCode, formatCurrency } from '../utils/currency';
 import { PaymentOptimizerMatrix } from './PaymentOptimizerMatrix';
 import { CycleGraceVisualizer } from './CycleGraceVisualizer';
 import { InstallmentsCashFlowTracker } from './InstallmentsCashFlowTracker';
+import { RewardsCashbackBalancer } from './RewardsCashbackBalancer';
 
 interface StrategyCashFlowHubProps {
+  initialView?: 'sequencer' | 'cycle_matrix' | 'installments' | 'rewards_balancer';
   accounts: BillAccount[];
   schedule: PaymentScheduleItem[];
   strategy: PaymentStrategyType;
   onStrategyChange: (strat: PaymentStrategyType) => void;
   allocatedCash: number;
   onAllocatedCashChange: (val: number) => void;
-  paidScheduleIds: string[];
-  scheduledScheduleIds: string[];
+  paidScheduleIds: Set<string> | string[];
+  scheduledScheduleIds: Set<string> | string[];
   onToggleStatus: (id: string) => void;
   onOpenAIAdvisor: () => void;
   onAdviseSettlement: (accountId?: string) => void;
@@ -40,9 +44,13 @@ interface StrategyCashFlowHubProps {
   onAddInstallment: (plan: Omit<InstallmentPlan, 'id'>) => void;
   onDeleteInstallment: (planId: string) => void;
   currency: CurrencyCode;
+  expenses?: ExpenseItem[];
+  onUpdateAccount?: (account: BillAccount) => void;
+  onQuickLogExpense?: (prefill: { amount: number; accountId: string; category: string; description: string; date: string }) => void;
 }
 
 export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
+  initialView = 'sequencer',
   accounts = [],
   schedule = [],
   strategy,
@@ -59,8 +67,19 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
   onAddInstallment,
   onDeleteInstallment,
   currency,
+  expenses = [],
+  onUpdateAccount,
+  onQuickLogExpense,
 }) => {
-  const [subView, setSubView] = useState<'sequencing' | 'cycle_matrix' | 'installments'>('sequencing');
+  const [subView, setSubView] = useState<'sequencing' | 'cycle_matrix' | 'installments' | 'rewards_balancer'>(
+    initialView === 'cycle_matrix'
+      ? 'cycle_matrix'
+      : initialView === 'installments'
+      ? 'installments'
+      : initialView === 'rewards_balancer'
+      ? 'rewards_balancer'
+      : 'sequencing'
+  );
 
   return (
     <div className="space-y-5">
@@ -77,7 +96,7 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Payment Sequencing Engine</span>
+            <span>Payment Sequencing</span>
           </button>
 
           <button
@@ -90,7 +109,20 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
             }`}
           >
             <Calendar className="w-3.5 h-3.5" />
-            <span>Grace Float & Cycle Calendar</span>
+            <span>Grace Float Calendar</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubView('rewards_balancer')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              subView === 'rewards_balancer'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Gift className="w-3.5 h-3.5 text-amber-400" />
+            <span>Cashback & Rewards Balancer</span>
           </button>
 
           <button
@@ -103,7 +135,7 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
             }`}
           >
             <ShoppingBag className="w-3.5 h-3.5" />
-            <span>0% Installments & Projections ({installments.length})</span>
+            <span>0% Installments ({installments.length})</span>
           </button>
         </div>
 
@@ -139,6 +171,16 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
         <CycleGraceVisualizer
           accounts={accounts}
           currency={currency}
+        />
+      )}
+
+      {subView === 'rewards_balancer' && (
+        <RewardsCashbackBalancer
+          accounts={accounts}
+          expenses={expenses}
+          currency={currency}
+          onUpdateAccount={onUpdateAccount}
+          onQuickLogExpense={onQuickLogExpense}
         />
       )}
 

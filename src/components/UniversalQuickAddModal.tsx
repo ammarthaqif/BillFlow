@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   X, 
   CreditCard, 
@@ -11,7 +11,13 @@ import {
   ShoppingBag,
   Sparkles,
   ArrowRight,
-  Receipt
+  Receipt,
+  QrCode,
+  Tag,
+  CheckCircle2,
+  Banknote,
+  Gift,
+  AlertTriangle
 } from 'lucide-react';
 import { 
   BillAccount, 
@@ -21,9 +27,12 @@ import {
   PaymentMode,
   StandingInstruction,
   InstallmentPlan,
-  UserProfile
+  UserProfile,
+  ExpenseItem,
+  QuickPayTemplate
 } from '../types';
 import { CurrencyCode, formatCurrency, getCurrencyConfig } from '../utils/currency';
+import { recommendBestCardForPurchase } from '../utils/rewardsOptimizer';
 import { 
   EXPENSE_CATEGORIES_LIST, 
   getExpenseCategoryIcon, 
@@ -35,9 +44,13 @@ interface UniversalQuickAddModalProps {
   isOpen: boolean;
   onClose: () => void;
   accounts: BillAccount[];
+  expenses?: ExpenseItem[];
   currency: CurrencyCode;
   currentUser: UserProfile | null;
   initialTab?: 'expense' | 'bank_balance' | 'account' | 'recurring';
+  quickPayTemplates?: QuickPayTemplate[];
+  onSaveQuickPayTemplate?: (template: QuickPayTemplate) => void;
+  onSelectQuickPayForPay?: (template: QuickPayTemplate) => void;
   onAddExpense: (
     data: any, 
     immediateSettle?: { method: SettlementMethod; sourceAccountId?: string },
@@ -54,9 +67,13 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
   isOpen,
   onClose,
   accounts = [],
+  expenses = [],
   currency,
   currentUser,
   initialTab = 'expense',
+  quickPayTemplates = [],
+  onSaveQuickPayTemplate,
+  onSelectQuickPayForPay,
   onAddExpense,
   onUpdateBankBalance,
   onAddAccount,
@@ -70,16 +87,36 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
   const [activeTab, setActiveTab] = useState<'expense' | 'bank_balance' | 'account' | 'recurring'>(initialTab);
 
   // TAB 1: EXPENSE STATE
+  const bankAccounts = accounts.filter((a) => a.type === 'bank_account');
   const [expTitle, setExpTitle] = useState('');
   const [expAmount, setExpAmount] = useState('');
   const [expCategory, setExpCategory] = useState<ExpenseCategory>('Dining & Groceries');
+  const [expPaymentMode, setExpPaymentMode] = useState<'credit_card' | 'bnpl' | 'duitnow_qr' | 'cash'>('credit_card');
   const [expAccountId, setExpAccountId] = useState(accounts[0]?.id || '');
+  const [expLinkedBankId, setExpLinkedBankId] = useState(bankAccounts[0]?.id || '');
   const [expDate, setExpDate] = useState(new Date().toISOString().split('T')[0]);
   const [expImmediateSettle, setExpImmediateSettle] = useState(false);
   const [expSplitMonths, setExpSplitMonths] = useState<number>(1);
+  const [expTags, setExpTags] = useState<string[]>([]);
+  const [expCustomTagInput, setExpCustomTagInput] = useState('');
+  const [saveAsQuickPay, setSaveAsQuickPay] = useState(false);
+  const [quickPayBillerRef, setQuickPayBillerRef] = useState('');
+
+  // Intelligent Rewards & Balancing Recommendation
+  const numExpAmount = parseFloat(expAmount) || 0;
+  const quickAddRecommendations = useMemo(() => {
+    if (numExpAmount <= 0) return [];
+    return recommendBestCardForPurchase({
+      amount: numExpAmount,
+      date: expDate,
+      category: expCategory,
+      accounts,
+      expenses,
+    });
+  }, [numExpAmount, expDate, expCategory, accounts, expenses]);
+  const topQuickRecommendation = quickAddRecommendations.length > 0 ? quickAddRecommendations[0] : null;
 
   // TAB 2: BANK BALANCE STATE
-  const bankAccounts = accounts.filter((a) => a.type === 'bank_account');
   const [selectedBankId, setSelectedBankId] = useState(bankAccounts[0]?.id || accounts[0]?.id || '');
   const currentSelectedBank = accounts.find((a) => a.id === selectedBankId);
   const [newBalanceInput, setNewBalanceInput] = useState(currentSelectedBank ? currentSelectedBank.totalBalance.toString() : '');
@@ -110,19 +147,42 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
     return d.toISOString().split('T')[0];
   });
 
+  const handleToggleTag = (tag: string) => {
+    setExpTags((prev) => 
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const handleAddCustomTag = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = expCustomTagInput.trim();
+    if (!clean) return;
+    const formatted = clean.startsWith('#') ? clean : `#${clean}`;
+    if (!expTags.includes(formatted)) {
+      setExpTags((prev) => [...prev, formatted]);
+    }
+    setExpCustomTagInput('');
+  };
+
   // SUBMIT HANDLERS
   const handleExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(expAmount);
     if (isNaN(amount) || amount <= 0) return;
 
-    const acc = accounts.find((a) => a.id === expAccountId);
-    const immediate = expImmediateSettle ? {
-      method: 'instant_fpx' as SettlementMethod,
-      sourceAccountId: bankAccounts[0]?.id,
+    const isQRMode = expPaymentMode === 'duitnow_qr' || expCategory === 'QR Payment';
+    const targetBank = accounts.find((a) => a.id === expLinkedBankId) || bankAccounts[0];
+    const acc = isQRMode ? targetBank : accounts.find((a) => a.id === expAccountId);
+
+    const isSettled = isQRMode || expImmediateSettle || expPaymentMode === 'cash';
+    const settlementMethod: SettlementMethod = isQRMode ? 'duitnow_qr' : expPaymentMode === 'cash' ? 'instant_fpx' : 'instant_fpx';
+
+    const immediate = isSettled ? {
+      method: settlementMethod,
+      sourceAccountId: isQRMode ? (targetBank?.id || expLinkedBankId) : bankAccounts[0]?.id,
     } : undefined;
 
-    const installmentSplit = expSplitMonths > 1 ? {
+    const installmentSplit = (!isSettled && expSplitMonths > 1) ? {
       tenure: expSplitMonths,
       monthlyAmount: Math.round((amount / expSplitMonths) * 100) / 100,
       interestRate: 0,
@@ -130,22 +190,48 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
 
     onAddExpense(
       {
-        accountId: expAccountId,
-        accountName: acc?.name || 'Account',
-        accountType: acc?.type || 'credit_card',
+        accountId: isQRMode && targetBank ? targetBank.id : expAccountId,
+        accountName: isQRMode && targetBank ? targetBank.name : (acc?.name || 'Account'),
+        accountType: isQRMode ? 'bank_account' : (acc?.type || 'credit_card'),
         title: expTitle.trim() || `${expCategory} Purchase`,
         category: expCategory,
         amount,
         date: expDate,
-        status: expImmediateSettle ? 'settled' : 'unsettled',
-        paymentMode: acc?.type === 'ewallet_pay_later' ? 'bnpl' : acc?.type === 'bank_account' ? 'cash' : 'credit_card',
-        settlementMethod: expImmediateSettle ? 'instant_fpx' : undefined,
+        status: isSettled ? 'settled' : 'unsettled',
+        paymentMode: isQRMode ? 'duitnow_qr' : expPaymentMode === 'bnpl' ? 'bnpl' : expPaymentMode === 'cash' ? 'cash' : 'credit_card',
+        settlementMethod: isSettled ? settlementMethod : undefined,
+        settledFromAccountId: isSettled ? (isQRMode ? targetBank?.id : bankAccounts[0]?.id) : undefined,
+        tags: expTags.length > 0 ? expTags : undefined,
         ownerName: currentUser?.name,
         ownerRole: currentUser?.familyRole,
       },
       immediate,
       installmentSplit
     );
+
+    // Save as Quick Pay Template if requested
+    if (saveAsQuickPay && onSaveQuickPayTemplate) {
+      const sourceAcc = isQRMode ? targetBank : accounts.find((a) => a.id === expAccountId);
+      onSaveQuickPayTemplate({
+        id: `qpt-${Date.now().toString(36)}`,
+        title: expTitle.trim() || `${expCategory} Bill`,
+        beneficiary: expTitle.trim() || `${expCategory} Biller`,
+        beneficiaryAccountOrRef: quickPayBillerRef.trim() || 'Direct Account Transfer',
+        defaultAmount: amount,
+        category: expCategory,
+        settlementMethod: isQRMode ? 'duitnow_qr' : 'instant_fpx',
+        paymentMode: isQRMode ? 'duitnow_qr' : expPaymentMode === 'bnpl' ? 'bnpl' : expPaymentMode === 'cash' ? 'cash' : 'credit_card',
+        sourceAccountId: isQRMode && targetBank ? targetBank.id : expAccountId,
+        sourceAccountName: sourceAcc?.name,
+        frequencyHint: 'monthly',
+        usageCount: 1,
+        lastUsedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        ownerName: currentUser?.name,
+        ownerRole: currentUser?.familyRole,
+      });
+    }
+
     onClose();
   };
 
@@ -324,6 +410,178 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
           {/* TAB 1: LOG EXPENSE / SWIPE */}
           {activeTab === 'expense' && (
             <form onSubmit={handleExpenseSubmit} className="space-y-4">
+              {/* QUICK PAY TEMPLATES: 1-Click Fast Fill for recurring bills */}
+              {quickPayTemplates && quickPayTemplates.length > 0 && (
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/30 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-amber-400 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 fill-amber-400" />
+                      <span>Quick Pay Common Bill Templates:</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400">1-click autofill</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                    {quickPayTemplates.map((tpl) => (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => {
+                          setExpTitle(tpl.title);
+                          setExpAmount(tpl.defaultAmount.toString());
+                          setExpCategory(tpl.category);
+                          if (tpl.sourceAccountId) {
+                            setExpAccountId(tpl.sourceAccountId);
+                            setExpLinkedBankId(tpl.sourceAccountId);
+                          }
+                          if (tpl.paymentMode) {
+                            setExpPaymentMode(tpl.paymentMode);
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-500/20 text-slate-200 hover:text-amber-300 border border-slate-700/80 hover:border-amber-500/50 flex items-center gap-1.5 text-xs whitespace-nowrap transition-all cursor-pointer group"
+                        title={`Fill ${tpl.title} (${tpl.beneficiary})`}
+                      >
+                        <span className="text-amber-400 group-hover:scale-110 transition-transform">⚡</span>
+                        <span className="font-semibold text-slate-200 group-hover:text-amber-200">{tpl.title}</span>
+                        <span className="font-mono text-slate-400 text-[11px]">
+                          ({formatCurrency(tpl.defaultAmount, currency)})
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SMART REWARDS & BALANCING CHIP */}
+              {numExpAmount > 0 && topQuickRecommendation && (
+                <div className="p-3 rounded-xl bg-gradient-to-r from-slate-950 via-indigo-950/40 to-slate-950 border border-indigo-500/40 shadow-sm flex items-center justify-between gap-3 animate-fadeIn">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                          Recommended: {topQuickRecommendation.accountName}
+                        </span>
+                        <span className="text-[10px] font-bold text-amber-300 bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-500/30">
+                          {topQuickRecommendation.projectedEarnedDescription}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">
+                        {topQuickRecommendation.reason}
+                      </p>
+                    </div>
+                  </div>
+
+                  {expAccountId === topQuickRecommendation.accountId ? (
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/40 px-2 py-1 rounded-md border border-emerald-500/30 shrink-0">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Active</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpAccountId(topQuickRecommendation.accountId);
+                        if (topQuickRecommendation.accountType === 'credit_card') {
+                          setExpPaymentMode('credit_card');
+                        } else if (topQuickRecommendation.accountType === 'ewallet_pay_later') {
+                          setExpPaymentMode('bnpl');
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] shrink-0 cursor-pointer transition-colors shadow-sm"
+                    >
+                      Use Card
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Payment Mode Selector */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Payment Method
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpPaymentMode('credit_card');
+                      setExpImmediateSettle(false);
+                    }}
+                    className={`p-2 rounded-xl border text-left transition-all flex items-center gap-2 cursor-pointer ${
+                      expPaymentMode === 'credit_card' && expCategory !== 'QR Payment'
+                        ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm ring-1 ring-indigo-500'
+                        : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-[11px] leading-tight">Credit Card</div>
+                      <div className="text-[9px] text-slate-400">Statement float</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpPaymentMode('duitnow_qr');
+                      setExpImmediateSettle(true);
+                      setExpCategory('QR Payment');
+                    }}
+                    className={`p-2 rounded-xl border text-left transition-all flex items-center gap-2 cursor-pointer ${
+                      expPaymentMode === 'duitnow_qr' || expCategory === 'QR Payment'
+                        ? 'bg-pink-600/20 border-pink-500 text-white shadow-sm ring-1 ring-pink-500'
+                        : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <QrCode className="w-4 h-4 text-pink-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-[11px] leading-tight">DuitNow / QR</div>
+                      <div className="text-[9px] text-pink-300">Bank debit</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpPaymentMode('bnpl');
+                      setExpImmediateSettle(false);
+                    }}
+                    className={`p-2 rounded-xl border text-left transition-all flex items-center gap-2 cursor-pointer ${
+                      expPaymentMode === 'bnpl' && expCategory !== 'QR Payment'
+                        ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500'
+                        : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <ShoppingBag className="w-4 h-4 text-purple-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-[11px] leading-tight">PayLater</div>
+                      <div className="text-[9px] text-slate-400">SPay / Atome</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpPaymentMode('cash');
+                      setExpImmediateSettle(true);
+                    }}
+                    className={`p-2 rounded-xl border text-left transition-all flex items-center gap-2 cursor-pointer ${
+                      expPaymentMode === 'cash' && expCategory !== 'QR Payment'
+                        ? 'bg-emerald-600/20 border-emerald-500 text-white shadow-sm ring-1 ring-emerald-500'
+                        : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-[11px] leading-tight">Direct Cash</div>
+                      <div className="text-[9px] text-slate-400">Zero debt</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -348,21 +606,58 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Charged Account / Card *
+                    {expPaymentMode === 'duitnow_qr' || expCategory === 'QR Payment'
+                      ? 'Linked Bank Account (DuitNow Source) *'
+                      : 'Charged Account / Card *'}
                   </label>
-                  <select
-                    value={expAccountId}
-                    onChange={(e) => setExpAccountId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-medium focus:border-indigo-500 focus:outline-none"
-                  >
-                    {accounts.map((acc) => (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.name} ({getAccountTypeLabel(acc.type)})
-                      </option>
-                    ))}
-                  </select>
+                  {expPaymentMode === 'duitnow_qr' || expCategory === 'QR Payment' ? (
+                    <select
+                      value={expLinkedBankId}
+                      onChange={(e) => setExpLinkedBankId(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-pink-500/50 text-white text-xs font-medium focus:border-pink-500 focus:outline-none ring-1 ring-pink-500/20"
+                    >
+                      {bankAccounts.length > 0 ? (
+                        bankAccounts.map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            🏦 {acc.name} ({acc.institution}) • {formatCurrency(acc.totalBalance, currency)}
+                          </option>
+                        ))
+                      ) : (
+                        accounts.map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.name} ({getAccountTypeLabel(acc.type)})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  ) : (
+                    <select
+                      value={expAccountId}
+                      onChange={(e) => setExpAccountId(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-medium focus:border-indigo-500 focus:outline-none"
+                    >
+                      {accounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({getAccountTypeLabel(acc.type)})
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
+
+              {/* DuitNow QR Info Callout */}
+              {(expPaymentMode === 'duitnow_qr' || expCategory === 'QR Payment') && (
+                <div className="p-3 rounded-xl bg-pink-950/30 border border-pink-500/30 text-xs flex items-center justify-between text-pink-200">
+                  <div className="flex items-center gap-2">
+                    <QrCode className="w-4 h-4 text-pink-400 shrink-0" />
+                    <span>DuitNow QR Scan & Pay • Debits directly from your chosen bank balance. Zero credit card debt.</span>
+                  </div>
+                  <span className="text-[10px] font-bold bg-pink-500/20 text-pink-300 px-2 py-0.5 rounded-full whitespace-nowrap">
+                    Instant Debit
+                  </span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -372,7 +667,7 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
                   type="text"
                   value={expTitle}
                   onChange={(e) => setExpTitle(e.target.value)}
-                  placeholder="e.g. Weekly Groceries, Fuel, Starbucks"
+                  placeholder={expPaymentMode === 'duitnow_qr' ? 'e.g. Hawker Stall, Mamak, Family Mart QR' : 'e.g. Weekly Groceries, Fuel, Starbucks'}
                   required
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs focus:border-indigo-500 focus:outline-none"
                 />
@@ -385,7 +680,14 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
                   </label>
                   <select
                     value={expCategory}
-                    onChange={(e) => setExpCategory(e.target.value as ExpenseCategory)}
+                    onChange={(e) => {
+                      const val = e.target.value as ExpenseCategory;
+                      setExpCategory(val);
+                      if (val === 'QR Payment') {
+                        setExpPaymentMode('duitnow_qr');
+                        setExpImmediateSettle(true);
+                      }
+                    }}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs focus:border-indigo-500 focus:outline-none"
                   >
                     {EXPENSE_CATEGORIES_LIST.map((cat) => (
@@ -409,42 +711,159 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
                 </div>
               </div>
 
-              {/* Settlement Options */}
-              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={expImmediateSettle}
-                    onChange={(e) => {
-                      setExpImmediateSettle(e.target.checked);
-                      if (e.target.checked) setExpSplitMonths(1);
-                    }}
-                    className="rounded border-slate-700 text-emerald-500 focus:ring-emerald-400"
-                  />
-                  <div className="text-xs">
-                    <span className="font-semibold text-white">Settle immediately from Bank Account</span>
-                    <span className="text-slate-400 block text-[11px]">
-                      Deducts directly from liquid bank balance; zero statement debt created.
-                    </span>
-                  </div>
-                </label>
+              {/* Tags & Custom Labels */}
+              <div className="space-y-2 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                <div className="flex items-center justify-between text-xs">
+                  <label className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Tags & Labels (Filter & Group)</span>
+                  </label>
+                  <span className="text-[10px] text-slate-500">Optional</span>
+                </div>
 
-                {!expImmediateSettle && (
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                    <span className="text-slate-300">Convert to 0% Installment Plan:</span>
-                    <select
-                      value={expSplitMonths}
-                      onChange={(e) => setExpSplitMonths(parseInt(e.target.value, 10))}
-                      className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1 focus:outline-none"
-                    >
-                      <option value={1}>1 Month (Standard Statement)</option>
-                      <option value={3}>3-Month Split (0%)</option>
-                      <option value={6}>6-Month Split (0%)</option>
-                      <option value={12}>12-Month Split (0%)</option>
-                    </select>
+                {/* Suggested Quick Tags */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {['#business', '#vacation', '#tax-deductible', '#personal', '#family'].map((tag) => {
+                    const active = expTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => handleToggleTag(tag)}
+                        className={`text-[11px] px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
+                          active
+                            ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200 font-bold'
+                            : 'bg-slate-900 border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                        }`}
+                      >
+                        {tag} {active && '✓'}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom tag input */}
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={expCustomTagInput}
+                    onChange={(e) => setExpCustomTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomTag();
+                      }
+                    }}
+                    placeholder="Type custom tag (e.g. #renovation) & press Enter"
+                    className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-white text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddCustomTag()}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                {/* Active tags display if any custom */}
+                {expTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {expTags.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 text-[10px] font-semibold"
+                      >
+                        {t}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleTag(t)}
+                          className="hover:text-rose-400 cursor-pointer ml-0.5"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
+
+              {/* Settlement Options (for non-QR and non-cash) */}
+              {expPaymentMode !== 'duitnow_qr' && expCategory !== 'QR Payment' && expPaymentMode !== 'cash' && (
+                <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={expImmediateSettle}
+                      onChange={(e) => {
+                        setExpImmediateSettle(e.target.checked);
+                        if (e.target.checked) setExpSplitMonths(1);
+                      }}
+                      className="rounded border-slate-700 text-emerald-500 focus:ring-emerald-400"
+                    />
+                    <div className="text-xs">
+                      <span className="font-semibold text-white">Settle immediately from Bank Account</span>
+                      <span className="text-slate-400 block text-[11px]">
+                        Deducts directly from liquid bank balance; zero statement debt created.
+                      </span>
+                    </div>
+                  </label>
+
+                  {!expImmediateSettle && (
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                      <span className="text-slate-300">Convert to 0% Installment Plan:</span>
+                      <select
+                        value={expSplitMonths}
+                        onChange={(e) => setExpSplitMonths(parseInt(e.target.value, 10))}
+                        className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1 focus:outline-none"
+                      >
+                        <option value={1}>1 Month (Standard Statement)</option>
+                        <option value={3}>3-Month Split (0%)</option>
+                        <option value={6}>6-Month Split (0%)</option>
+                        <option value={12}>12-Month Split (0%)</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Quick Pay Template Save Option */}
+              {onSaveQuickPayTemplate && (
+                <div className="p-3.5 rounded-xl bg-slate-950/60 border border-amber-500/20 space-y-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={saveAsQuickPay}
+                      onChange={(e) => setSaveAsQuickPay(e.target.checked)}
+                      className="rounded border-slate-700 text-amber-500 focus:ring-amber-400"
+                    />
+                    <div className="text-xs">
+                      <span className="font-semibold text-amber-300 flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                        <span>Save as Quick Pay Template</span>
+                      </span>
+                      <span className="text-slate-400 block text-[11px]">
+                        Save this bill amount and beneficiary for 1-click settlement in future months.
+                      </span>
+                    </div>
+                  </label>
+
+                  {saveAsQuickPay && (
+                    <div className="pt-2 border-t border-slate-800/80 animate-fadeIn">
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                        Biller Account No. / JomPAY Biller Code / Reference
+                      </label>
+                      <input
+                        type="text"
+                        value={quickPayBillerRef}
+                        onChange={(e) => setQuickPayBillerRef(e.target.value)}
+                        placeholder="e.g. TNB Account 220019283921 or JomPAY Code 5454"
+                        className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="pt-2 flex items-center justify-between gap-3">
                 {onOpenReceiptCapture && (

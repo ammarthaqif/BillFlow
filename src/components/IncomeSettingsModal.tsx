@@ -7,7 +7,8 @@ import {
   ShieldCheck, 
   Sparkles, 
   HelpCircle,
-  Check
+  Check,
+  Target
 } from 'lucide-react';
 import { UserSettings, BillAccount } from '../types';
 import { formatCurrency, CurrencyCode } from '../utils/currency';
@@ -40,6 +41,7 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
   const [paycheckDates, setPaycheckDates] = useState<number[]>(settings.paycheckDates ?? [1, 15]);
   const [primaryBankId, setPrimaryBankId] = useState<string>(settings.primaryBankAccountId ?? (bankAccounts[0]?.id ?? ''));
   const [safetyBufferInput, setSafetyBufferInput] = useState<string>(settings.safetyBufferAmount?.toString() ?? '300');
+  const [spendingCapInput, setSpendingCapInput] = useState<string>(settings.monthlySpendingCap?.toString() ?? '5000');
 
   useEffect(() => {
     if (isOpen) {
@@ -48,6 +50,7 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
       setPaycheckDates(settings.paycheckDates ?? [1, 15]);
       setPrimaryBankId(settings.primaryBankAccountId ?? (bankAccounts[0]?.id ?? ''));
       setSafetyBufferInput(settings.safetyBufferAmount?.toString() ?? '300');
+      setSpendingCapInput(settings.monthlySpendingCap?.toString() ?? '5000');
     }
   }, [isOpen, settings]);
 
@@ -55,6 +58,7 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
 
   const numericIncome = Math.max(0, parseFloat(incomeInput) || 0);
   const numericBuffer = Math.max(0, parseFloat(safetyBufferInput) || 0);
+  const numericSpendingCap = Math.max(0, parseFloat(spendingCapInput) || 0);
 
   // Quick preset incomes
   const incomePresets = [3500, 5000, 6500, 8500, 12000, 15000];
@@ -105,6 +109,7 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
       paycheckDates: paycheckDates.length > 0 ? paycheckDates : [1, 15],
       primaryBankAccountId: primaryBankId || undefined,
       safetyBufferAmount: numericBuffer,
+      monthlySpendingCap: numericSpendingCap > 0 ? numericSpendingCap : 5000,
     };
     onSaveSettings(updated);
     onClose();
@@ -375,6 +380,46 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
             />
             <p className="text-[11px] text-slate-400">
               The Advisor will ensure you keep this minimum liquid buffer in your bank after settling any credit card statement or BNPL bill.
+            </p>
+          </div>
+
+          {/* Monthly Spending Cap & Limit */}
+          <div className="space-y-2 pt-2 border-t border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <label className="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
+                <Target className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Monthly Spending Cap</span>
+                <span className="text-[10px] text-slate-400 font-normal">(Expenses target limit)</span>
+              </label>
+              <span className="text-xs font-semibold text-indigo-400">
+                {formatCurrency(numericSpendingCap, currency)}
+              </span>
+            </div>
+            <input
+              type="number"
+              min="100"
+              step="500"
+              value={spendingCapInput ?? ''}
+              onChange={(e) => setSpendingCapInput(e.target.value)}
+              placeholder="e.g. 5000"
+              className="w-full bg-slate-800/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs text-white font-medium focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+            {/* Quick Presets */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px]">
+              <span className="text-slate-400">Presets:</span>
+              {[3000, 4500, 6000, 8000, 10000].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setSpendingCapInput(p.toString())}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                >
+                  {formatCurrency(p, currency)}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Visualized in Executive Overview and Daily Command Hub as a progress bar tracking total monthly expenses against this cap.
             </p>
           </div>
         </div>

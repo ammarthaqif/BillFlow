@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   TrendingDown, 
   AlertCircle, 
@@ -10,25 +10,34 @@ import {
   Clock,
   Landmark,
   ChevronRight,
-  ArrowUpRight
+  ArrowUpRight,
+  Target,
+  Edit2,
+  Check,
+  X,
+  Gauge
 } from 'lucide-react';
-import { BillAccount, InstallmentPlan, UserSettings } from '../types';
+import { BillAccount, InstallmentPlan, UserSettings, ExpenseItem } from '../types';
 import { formatCurrency } from '../utils/currency';
 
 interface ExecutiveOverviewProps {
   accounts: BillAccount[];
   installments: InstallmentPlan[];
   settings: UserSettings;
+  expenses?: ExpenseItem[];
   onOpenIncomeSettings?: () => void;
   onOpenBankAdvisor?: (accountId?: string) => void;
+  onUpdateSpendingCap?: (newCap: number) => void;
 }
 
 export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
   accounts = [],
   installments = [],
   settings,
+  expenses = [],
   onOpenIncomeSettings,
   onOpenBankAdvisor,
+  onUpdateSpendingCap,
 }) => {
   const currency = settings.currency || 'MYR';
   const totalBalance = (accounts || []).reduce((sum, a) => sum + a.totalBalance, 0);
@@ -47,6 +56,25 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
   );
 
   const installmentBurdenPercent = Math.round((totalMonthlyInstallments / settings.monthlyIncome) * 100);
+
+  // Monthly Spending Cap & Progress calculations
+  const spendingCap = settings.monthlySpendingCap ?? 5000;
+  const totalExpenses = (expenses || []).reduce((sum, e) => sum + e.amount, 0);
+  const spendingProgressPercent = spendingCap > 0 ? Math.round((totalExpenses / spendingCap) * 100) : 0;
+  const remainingBudget = spendingCap - totalExpenses;
+  const isOverBudget = remainingBudget < 0;
+
+  // Inline spending cap editor state
+  const [isEditingCap, setIsEditingCap] = useState(false);
+  const [capInput, setCapInput] = useState<string>(spendingCap.toString());
+
+  const handleSaveCap = () => {
+    const val = parseFloat(capInput);
+    if (!isNaN(val) && val > 0 && onUpdateSpendingCap) {
+      onUpdateSpendingCap(val);
+    }
+    setIsEditingCap(false);
+  };
 
   return (
     <div className="space-y-4">
@@ -188,36 +216,228 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
         </div>
       </div>
 
-      {/* Credit Utilization Bar */}
-      <div className="bg-slate-900/70 rounded-xl p-3.5 border border-slate-800 text-xs text-slate-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-slate-200">Revolving Credit Utilization:</span>
-          <span className={`font-bold ${utilizationRatio > 50 ? 'text-rose-400' : utilizationRatio > 30 ? 'text-amber-400' : 'text-emerald-400'}`}>
-            {utilizationRatio.toFixed(1)}%
-          </span>
-          <span className="text-slate-500">
-            ({formatCurrency(totalBalance, currency)} of {formatCurrency(totalCreditLimit, currency)} limit)
-          </span>
+      {/* Dual Financial Health Bars: Monthly Spending Cap Tracker & Revolving Credit Utilization */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Card 1: Monthly Spending Cap Tracker */}
+        <div className="bg-slate-900/80 rounded-xl p-4 border border-slate-800 shadow-sm flex flex-col justify-between gap-3 text-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`p-1.5 rounded-lg ${
+                isOverBudget
+                  ? 'bg-rose-500/15 text-rose-400'
+                  : spendingProgressPercent > 80
+                  ? 'bg-amber-500/15 text-amber-400'
+                  : 'bg-indigo-500/15 text-indigo-400'
+              }`}>
+                <Target className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-bold text-white text-sm">Monthly Spending Cap</span>
+                <span className="text-[11px] text-slate-400 block">
+                  Target spending limit for all day-to-day purchases
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                isOverBudget
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                  : spendingProgressPercent > 80
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+              }`}>
+                {isOverBudget ? (
+                  <>
+                    <AlertCircle className="w-3 h-3" />
+                    <span>Over Limit</span>
+                  </>
+                ) : spendingProgressPercent > 80 ? (
+                  <>
+                    <Clock className="w-3 h-3" />
+                    <span>Near Cap</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-3 h-3" />
+                    <span>On Track</span>
+                  </>
+                )}
+              </span>
+
+              {onUpdateSpendingCap && !isEditingCap && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCapInput(spendingCap.toString());
+                    setIsEditingCap(true);
+                  }}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  title="Adjust monthly spending limit"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Quick inline editor if open */}
+          {isEditingCap ? (
+            <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-slate-300 font-semibold">Set Monthly Cap ({currency}):</span>
+              <input
+                type="number"
+                min="100"
+                step="500"
+                value={capInput}
+                onChange={(e) => setCapInput(e.target.value)}
+                className="w-28 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white font-bold focus:outline-none focus:border-indigo-500"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={handleSaveCap}
+                className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+              >
+                <Check className="w-3 h-3" />
+                <span>Save</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingCap(false)}
+                className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+              <div className="w-full flex items-center gap-1.5 pt-1 text-[10px] text-slate-400">
+                <span>Presets:</span>
+                {[3000, 5000, 7500, 10000].map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setCapInput(p.toString())}
+                    className="px-1.5 py-0.5 rounded bg-slate-700/60 hover:bg-slate-700 text-slate-200 cursor-pointer"
+                  >
+                    {formatCurrency(p, currency)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-baseline justify-between text-xs pt-1">
+              <div>
+                <span className="text-slate-400 text-[11px]">Total Expenses: </span>
+                <span className="font-bold text-white text-sm">
+                  {formatCurrency(totalExpenses, currency)}
+                </span>
+                <span className="text-slate-500 text-[11px] ml-1">
+                  of {formatCurrency(spendingCap, currency)} limit
+                </span>
+              </div>
+              <div className="text-right">
+                <span className={`font-bold text-xs ${isOverBudget ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {isOverBudget 
+                    ? `+${formatCurrency(Math.abs(remainingBudget), currency)} over cap`
+                    : `${formatCurrency(remainingBudget, currency)} remaining`}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Progress Bar */}
+          <div className="space-y-1">
+            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden flex relative">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  isOverBudget
+                    ? 'bg-gradient-to-r from-rose-500 to-red-600 shadow-sm shadow-rose-500/50'
+                    : spendingProgressPercent > 80
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+                    : 'bg-gradient-to-r from-emerald-500 to-teal-500'
+                }`}
+                style={{ width: `${Math.min(100, spendingProgressPercent)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+              <span>0%</span>
+              <span className={`font-semibold ${isOverBudget ? 'text-rose-400' : 'text-slate-300'}`}>
+                {spendingProgressPercent}% utilized
+              </span>
+              <span>100% ({formatCurrency(spendingCap, currency)})</span>
+            </div>
+          </div>
         </div>
 
-        {/* Bar */}
-        <div className="w-full sm:w-64 h-2.5 bg-slate-800 rounded-full overflow-hidden flex">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
+        {/* Card 2: Revolving Credit Utilization Bar */}
+        <div className="bg-slate-900/80 rounded-xl p-4 border border-slate-800 shadow-sm flex flex-col justify-between gap-3 text-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-blue-500/15 text-blue-400">
+                <Gauge className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-bold text-white text-sm">Revolving Credit Utilization</span>
+                <span className="text-[11px] text-slate-400 block">
+                  Credit cards & BNPL balance vs total credit line
+                </span>
+              </div>
+            </div>
+
+            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
               utilizationRatio > 50
-                ? 'bg-rose-500'
+                ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
                 : utilizationRatio > 30
-                ? 'bg-amber-500'
-                : 'bg-emerald-500'
-            }`}
-            style={{ width: `${Math.min(100, utilizationRatio)}%` }}
-          />
-        </div>
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+            }`}>
+              {utilizationRatio <= 30 ? 'Healthy <30%' : utilizationRatio <= 50 ? 'Moderate' : 'High Usage'}
+            </span>
+          </div>
 
-        <span className="text-[11px] text-slate-400 hidden lg:inline">
-          {utilizationRatio <= 30 ? 'Healthy (under recommended 30% threshold)' : 'Elevated: Prioritize payoff to improve credit rating'}
-        </span>
+          <div className="flex items-baseline justify-between text-xs pt-1">
+            <div>
+              <span className="text-slate-400 text-[11px]">Active Balance: </span>
+              <span className="font-bold text-white text-sm">
+                {formatCurrency(totalBalance, currency)}
+              </span>
+              <span className="text-slate-500 text-[11px] ml-1">
+                of {formatCurrency(totalCreditLimit, currency)} total limit
+              </span>
+            </div>
+            <div className="text-right">
+              <span className={`font-bold text-xs ${
+                utilizationRatio > 50 ? 'text-rose-400' : utilizationRatio > 30 ? 'text-amber-400' : 'text-emerald-400'
+              }`}>
+                {utilizationRatio.toFixed(1)}% Line Used
+              </span>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="space-y-1">
+            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden flex relative">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  utilizationRatio > 50
+                    ? 'bg-gradient-to-r from-rose-500 to-red-600 shadow-sm shadow-rose-500/50'
+                    : utilizationRatio > 30
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+                    : 'bg-gradient-to-r from-emerald-500 to-teal-500'
+                }`}
+                style={{ width: `${Math.min(100, utilizationRatio)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+              <span>0%</span>
+              <span className="text-slate-400">
+                Recommended threshold: 30% ({formatCurrency(totalCreditLimit * 0.3, currency)})
+              </span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 };
+

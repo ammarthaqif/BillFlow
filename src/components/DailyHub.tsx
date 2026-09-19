@@ -35,10 +35,12 @@ import {
   PaymentScheduleItem, 
   UserSettings, 
   ExpenseCategory,
-  SettlementMethod
+  SettlementMethod,
+  QuickPayTemplate
 } from '../types';
 import { CurrencyCode, formatCurrency, getCurrencyConfig } from '../utils/currency';
 import { renderAccountIcon, getAccountTypeLabel, getExpenseCategoryIcon } from '../utils/accountUtils';
+import { QuickPayStrip } from './QuickPayStrip';
 
 interface DailyHubProps {
   accounts: BillAccount[];
@@ -48,6 +50,10 @@ interface DailyHubProps {
   schedule?: PaymentScheduleItem[];
   settings?: UserSettings;
   currency: CurrencyCode;
+  quickPayTemplates?: QuickPayTemplate[];
+  onSelectQuickPayForPay?: (template: QuickPayTemplate) => void;
+  onOpenManageQuickPay?: () => void;
+  onOpenCreateQuickPay?: () => void;
   onQuickLogExpense: (data: {
     amount: number;
     title: string;
@@ -80,6 +86,10 @@ export const DailyHub: React.FC<DailyHubProps> = ({
   schedule = [],
   settings,
   currency,
+  quickPayTemplates = [],
+  onSelectQuickPayForPay,
+  onOpenManageQuickPay,
+  onOpenCreateQuickPay,
   onQuickLogExpense,
   onOpenReceiptCapture,
   onOpenAIAdvisor,
@@ -553,6 +563,16 @@ export const DailyHub: React.FC<DailyHubProps> = ({
           </div>
         )}
       </div>
+
+      {/* QUICK PAY TEMPLATES STRIP (Instant Recurring Bill Settlement) */}
+      <QuickPayStrip
+        templates={quickPayTemplates}
+        accounts={accounts}
+        currency={currency}
+        onSelectForPay={(tpl) => onSelectQuickPayForPay?.(tpl)}
+        onOpenManage={() => onOpenManageQuickPay?.()}
+        onOpenCreate={() => onOpenCreateQuickPay?.()}
+      />
 
       {/* 3. TODAY'S ACTION CHECKLIST & RECENT SWIPES (2-COLUMN GRID) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

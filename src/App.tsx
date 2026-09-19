@@ -12,7 +12,8 @@ import {
   SettlementMethod,
   StandingInstruction,
   BankScheduledTransaction,
-  ProPaymentRecord
+  ProPaymentRecord,
+  QuickPayTemplate
 } from './types';
 import { 
   INITIAL_ACCOUNTS, 
@@ -20,7 +21,8 @@ import {
   INITIAL_SETTINGS,
   INITIAL_EXPENSES,
   INITIAL_STANDING_INSTRUCTIONS,
-  INITIAL_BANK_SCHEDULED_TRANSACTIONS
+  INITIAL_BANK_SCHEDULED_TRANSACTIONS,
+  INITIAL_QUICK_PAY_TEMPLATES
 } from './data/seedData';
 import { 
   calculatePaymentSchedule, 
@@ -30,6 +32,7 @@ import {
 import { UserDatabaseService } from './services/userDatabaseService';
 import { formatCurrency } from './utils/currency';
 import { renderAccountIcon, getAccountTypeLabel, calculateInterestSavedEstimate } from './utils/accountUtils';
+import { processDueRecurringExpenses, forceGenerateNextRecurringMonth } from './utils/recurringExpenses';
 
 // Subcomponents
 import { Navbar } from './components/Navbar';
@@ -55,6 +58,8 @@ import { UpdateBankBalanceModal } from './components/UpdateBankBalanceModal';
 import { AccountTransactionsModal } from './components/AccountTransactionsModal';
 import { EditAccountModal } from './components/EditAccountModal';
 import { ExpenseModal } from './components/ExpenseModal';
+import { QuickPayExecuteModal } from './components/QuickPayExecuteModal';
+import { QuickPayManageModal } from './components/QuickPayManageModal';
 
 import { 
   Sliders, 
@@ -103,7 +108,7 @@ export default function App() {
   const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
   // Active view tab (default to 'today' for daily engagement & zero friction)
-  const [activeTab, setActiveTab] = useState<'today' | 'strategy' | 'expenses' | 'accounts' | 'optimizer' | 'cycle_matrix' | 'installments' | 'standing_instructions'>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'strategy' | 'expenses' | 'accounts' | 'optimizer' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'standing_instructions'>('today');
   // Accounts sub-tab: 'cards' or 'standing_instructions'
   const [accountsSubTab, setAccountsSubTab] = useState<'cards' | 'standing_instructions'>('cards');
 
@@ -145,6 +150,12 @@ export default function App() {
   const [standaloneExpenseInitialAccount, setStandaloneExpenseInitialAccount] = useState<string | undefined>(undefined);
   const [standaloneEditingExpense, setStandaloneEditingExpense] = useState<ExpenseItem | null>(null);
 
+  // Quick Pay Templates state (recurring non-automated bills)
+  const [quickPayTemplates, setQuickPayTemplates] = useState<QuickPayTemplate[]>([]);
+  const [isQuickPayExecuteOpen, setIsQuickPayExecuteOpen] = useState(false);
+  const [selectedQuickPayTemplate, setSelectedQuickPayTemplate] = useState<QuickPayTemplate | null>(null);
+  const [isQuickPayManageOpen, setIsQuickPayManageOpen] = useState(false);
+
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('Just now');
@@ -153,25 +164,48 @@ export default function App() {
   const loadDedicatedUserDatabase = useCallback((user: UserProfile) => {
     try {
       const db = UserDatabaseService.loadUserDatabase(user.id);
+      const loadedAccounts = db.accounts || [];
+      const rawExpenses = db.expenses && db.expenses.length > 0 ? db.expenses : INITIAL_EXPENSES;
+
+      // Check and automatically generate monthly recurring expenses due today or past-due
+      const { updatedExpenses, updatedAccounts, generatedCount } = processDueRecurringExpenses(rawExpenses, loadedAccounts);
+
       setUserDb(db);
-      setAccounts(db.accounts || []);
+      setAccounts(updatedAccounts);
       setInstallments(db.installments || []);
-      setExpenses(db.expenses && db.expenses.length > 0 ? db.expenses : INITIAL_EXPENSES);
+      setExpenses(updatedExpenses);
       setStandingInstructions(db.standingInstructions && db.standingInstructions.length > 0 ? db.standingInstructions : INITIAL_STANDING_INSTRUCTIONS);
       setBankScheduledTransactions(
         db.bankScheduledTransactions && db.bankScheduledTransactions.length > 0
           ? db.bankScheduledTransactions
           : INITIAL_BANK_SCHEDULED_TRANSACTIONS
       );
-      if (db.settings) {
+      if (db?.settings) {
         setSettings(db.settings);
-        setAllocatedCash(db.settings.allocatedCashForBills || 3500);
+        setAllocatedCash(db.settings.allocatedCashForBills ?? 3500);
         setStrategy(db.settings.defaultStrategy || 'grace_float');
+      } else {
+        setSettings(INITIAL_SETTINGS);
+        setAllocatedCash(3500);
+        setStrategy('grace_float');
       }
       setPaidScheduleIds(new Set(db.paidScheduleIds || []));
       setScheduledScheduleIds(new Set(db.scheduledScheduleIds || []));
       setAlertThresholds(db.alertThresholds || [7, 3, 1]);
-      setAutoSaveStatus('Loaded');
+      setQuickPayTemplates(
+        db.quickPayTemplates && db.quickPayTemplates.length > 0
+          ? db.quickPayTemplates
+          : INITIAL_QUICK_PAY_TEMPLATES
+      );
+      setAutoSaveStatus(generatedCount > 0 ? `Auto-generated ${generatedCount} bills` : 'Loaded');
+
+      if (generatedCount > 0) {
+        UserDatabaseService.saveUserDatabase({
+          ...db,
+          accounts: updatedAccounts,
+          expenses: updatedExpenses,
+        });
+      }
     } catch (err) {
       console.error('Failed to load user database:', err);
     }
@@ -193,7 +227,8 @@ export default function App() {
     updatedScheduled: Set<string>,
     updatedExpenses?: ExpenseItem[],
     updatedStandingInstructions?: StandingInstruction[],
-    updatedBankScheduledTransactions?: BankScheduledTransaction[]
+    updatedBankScheduledTransactions?: BankScheduledTransaction[],
+    updatedQuickPayTemplates?: QuickPayTemplate[]
   ) => {
     if (!currentUser) return;
     setAutoSaveStatus('Saving...');
@@ -209,6 +244,7 @@ export default function App() {
         expenses: updatedExpenses || expenses,
         standingInstructions: updatedStandingInstructions || standingInstructions,
         bankScheduledTransactions: updatedBankScheduledTransactions || bankScheduledTransactions,
+        quickPayTemplates: updatedQuickPayTemplates || quickPayTemplates,
         settings: updatedSettings,
         paidScheduleIds: Array.from(updatedPaid),
         scheduledScheduleIds: Array.from(updatedScheduled),
@@ -221,7 +257,7 @@ export default function App() {
       console.error('Auto-save error:', err);
       setAutoSaveStatus('Local state active');
     }
-  }, [currentUser, userDb, alertThresholds, expenses, standingInstructions, bankScheduledTransactions]);
+  }, [currentUser, userDb, alertThresholds, expenses, standingInstructions, bankScheduledTransactions, quickPayTemplates]);
 
   // Update dynamic alerts whenever accounts, installments, or currency changes
   useEffect(() => {
@@ -250,6 +286,13 @@ export default function App() {
 
   // Switch User Profile Handler
   const handleSwitchUser = (newUser: UserProfile) => {
+    if (currentUser) {
+      const check = UserDatabaseService.canSwitchToUser(currentUser, newUser.id);
+      if (!check.allowed) {
+        alert(check.reason || 'Switching to this user profile is not permitted.');
+        return;
+      }
+    }
     UserDatabaseService.setActiveUser(newUser.id);
     setCurrentUser(newUser);
     loadDedicatedUserDatabase(newUser);
@@ -270,12 +313,120 @@ export default function App() {
     if (updatedDb.bankScheduledTransactions) {
       setBankScheduledTransactions(updatedDb.bankScheduledTransactions);
     }
-    if (updatedDb.settings) {
+    if (updatedDb.quickPayTemplates) {
+      setQuickPayTemplates(updatedDb.quickPayTemplates);
+    }
+    if (updatedDb?.settings) {
       setSettings(updatedDb.settings);
-      setAllocatedCash(updatedDb.settings.allocatedCashForBills || 3500);
+      setAllocatedCash(updatedDb.settings.allocatedCashForBills ?? 3500);
       setStrategy(updatedDb.settings.defaultStrategy || 'grace_float');
     }
     setAutoSaveStatus('Synchronized');
+  };
+
+  // Quick Pay Template Handlers
+  const handleSaveQuickPayTemplate = (template: QuickPayTemplate) => {
+    if (!currentUser) return;
+    const updated = UserDatabaseService.saveQuickPayTemplate(currentUser.id, template);
+    setQuickPayTemplates(updated);
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      bankScheduledTransactions,
+      updated
+    );
+  };
+
+  const handleDeleteQuickPayTemplate = (templateId: string) => {
+    if (!currentUser) return;
+    const updated = UserDatabaseService.deleteQuickPayTemplate(currentUser.id, templateId);
+    setQuickPayTemplates(updated);
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      bankScheduledTransactions,
+      updated
+    );
+  };
+
+  const handleExecuteQuickPaySettlement = (
+    template: QuickPayTemplate,
+    settlementDetails: {
+      sourceAccountId: string;
+      amountPaid: number;
+      referenceCode: string;
+      notes?: string;
+    }
+  ) => {
+    if (!currentUser) return;
+
+    // 1. Record template usage
+    const updatedTemplates = UserDatabaseService.recordQuickPayUsage(currentUser.id, template.id);
+    setQuickPayTemplates(updatedTemplates);
+
+    // 2. Identify funding account
+    const sourceAcc = accounts.find((a) => a.id === settlementDetails.sourceAccountId);
+
+    // 3. Create settled expense item in ledger
+    const newExpense: ExpenseItem = {
+      id: `exp-qpay-${Date.now().toString(36)}`,
+      accountId: settlementDetails.sourceAccountId,
+      accountName: sourceAcc ? sourceAcc.name : (template.sourceAccountName || 'Direct Payment'),
+      accountType: sourceAcc ? sourceAcc.type : 'bank_account',
+      title: `${template.title} (${template.beneficiary})`,
+      category: template.category,
+      amount: settlementDetails.amountPaid,
+      date: new Date().toISOString().split('T')[0],
+      status: 'settled',
+      settledAt: new Date().toISOString(),
+      settlementMethod: template.settlementMethod,
+      settlementReference: settlementDetails.referenceCode,
+      settledFromAccountId: settlementDetails.sourceAccountId,
+      paymentMode: template.paymentMode,
+      notes: settlementDetails.notes || `Quick Pay: ${template.beneficiaryAccountOrRef} • Ref: ${settlementDetails.referenceCode}`,
+      ownerName: currentUser.name,
+      ownerRole: currentUser.familyRole,
+    };
+
+    const nextExpenses = [newExpense, ...expenses];
+    setExpenses(nextExpenses);
+
+    // 4. Update account balances
+    let nextAccounts = [...accounts];
+    const targetAccIndex = nextAccounts.findIndex((a) => a.id === settlementDetails.sourceAccountId);
+    if (targetAccIndex !== -1) {
+      const acc = nextAccounts[targetAccIndex];
+      if (acc.type === 'bank_account') {
+        nextAccounts[targetAccIndex] = {
+          ...acc,
+          totalBalance: Math.max(0, Math.round((acc.totalBalance - settlementDetails.amountPaid) * 100) / 100),
+          lastSyncedAt: new Date().toISOString(),
+        };
+      }
+      setAccounts(nextAccounts);
+    }
+
+    triggerAutoSave(
+      nextAccounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      nextExpenses,
+      standingInstructions,
+      bankScheduledTransactions,
+      updatedTemplates
+    );
   };
 
   // Update Income Settings Handler
@@ -823,7 +974,15 @@ export default function App() {
       }
     }
 
-    const nextExpenses = [createdExpense, ...expenses];
+    let nextExpenses = [createdExpense, ...expenses];
+
+    // If recurring expense was added, automatically verify and generate any due cycles
+    if (createdExpense.isRecurring) {
+      const recurringCheck = processDueRecurringExpenses(nextExpenses, nextAccounts);
+      nextExpenses = recurringCheck.updatedExpenses;
+      nextAccounts = recurringCheck.updatedAccounts;
+    }
+
     setExpenses(nextExpenses);
     setAccounts(nextAccounts);
     triggerAutoSave(nextAccounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
@@ -896,10 +1055,27 @@ export default function App() {
       }
     }
 
-    const nextExpenses = expenses.map((e) => (e.id === updatedExpense.id ? updatedExpense : e));
+    let nextExpenses = expenses.map((e) => (e.id === updatedExpense.id ? updatedExpense : e));
+
+    // If updated expense is recurring, process any due occurrences
+    if (updatedExpense.isRecurring) {
+      const recurringCheck = processDueRecurringExpenses(nextExpenses, nextAccounts);
+      nextExpenses = recurringCheck.updatedExpenses;
+      nextAccounts = recurringCheck.updatedAccounts;
+    }
+
     setExpenses(nextExpenses);
     setAccounts(nextAccounts);
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
+  };
+
+  // Force advance / simulate next month's recurring expense entry
+  const handleForceGenerateRecurringCycle = (parentExpense: ExpenseItem) => {
+    const result = forceGenerateNextRecurringMonth(parentExpense, expenses, accounts);
+    setExpenses(result.updatedExpenses);
+    setAccounts(result.updatedAccounts);
+    triggerAutoSave(result.updatedAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, result.updatedExpenses);
+    setAutoSaveStatus('Generated next month bill');
   };
 
   // Delete expense
@@ -1202,10 +1378,15 @@ export default function App() {
           accounts={accounts}
           installments={installments}
           settings={settings}
+          expenses={expenses}
           onOpenIncomeSettings={() => setIsIncomeSettingsOpen(true)}
           onOpenBankAdvisor={(accId) => {
             setAdvisorTargetAccountId(accId);
             setIsBankAdvisorOpen(true);
+          }}
+          onUpdateSpendingCap={(newCap) => {
+            const updated = { ...settings, monthlySpendingCap: newCap };
+            handleSaveIncomeSettings(updated);
           }}
         />
 
@@ -1274,6 +1455,13 @@ export default function App() {
             standingInstructions={standingInstructions}
             settings={settings}
             currency={settings.currency || 'MYR'}
+            quickPayTemplates={quickPayTemplates}
+            onSelectQuickPayForPay={(tpl) => {
+              setSelectedQuickPayTemplate(tpl);
+              setIsQuickPayExecuteOpen(true);
+            }}
+            onOpenManageQuickPay={() => setIsQuickPayManageOpen(true)}
+            onOpenCreateQuickPay={() => setIsQuickPayManageOpen(true)}
             onQuickLogExpense={handleQuickLogExpense}
             onOpenReceiptCapture={() => setIsReceiptCaptureOpen(true)}
             onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
@@ -1303,14 +1491,16 @@ export default function App() {
           />
         )}
 
-        {/* Tab 2: Strategy & Cash Flow Hub (Sequencer, Float Calendar, Installments) */}
-        {(activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments') && (
+        {/* Tab 2: Strategy & Cash Flow Hub (Sequencer, Float Calendar, Installments, Rewards Balancer) */}
+        {(activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments' || activeTab === 'rewards_balancer') && (
           <StrategyCashFlowHub
             initialView={
               activeTab === 'cycle_matrix'
                 ? 'cycle_matrix'
                 : activeTab === 'installments'
                 ? 'installments'
+                : activeTab === 'rewards_balancer'
+                ? 'rewards_balancer'
                 : 'sequencer'
             }
             accounts={accounts}
@@ -1342,6 +1532,12 @@ export default function App() {
             onAddInstallment={handleAddInstallment}
             onDeleteInstallment={handleDeleteInstallment}
             currency={settings.currency || 'MYR'}
+            expenses={expenses}
+            onUpdateAccount={handleUpdateAccount}
+            onQuickLogExpense={(prefill) => {
+              setStandaloneExpenseInitialAccount(prefill.accountId);
+              setIsStandaloneExpenseModalOpen(true);
+            }}
           />
         )}
 
@@ -1701,6 +1897,7 @@ export default function App() {
               setSelectedAccountForEdit(acc);
               setIsEditAccountOpen(true);
             }}
+            onForceGenerateRecurringCycle={handleForceGenerateRecurringCycle}
           />
         )}
       </main>
@@ -1799,6 +1996,7 @@ export default function App() {
           currentDb={userDb}
           onDatabaseUpdated={handleDatabaseUpdated}
           onSwitchUser={handleSwitchUser}
+          onUserUpdated={(updatedUser) => setCurrentUser(updatedUser)}
         />
       )}
 
@@ -1896,6 +2094,7 @@ export default function App() {
         }}
         editingExpense={standaloneEditingExpense}
         accounts={accounts}
+        expenses={expenses}
         currency={settings.currency || 'MYR'}
         initialAccountId={standaloneExpenseInitialAccount}
         onSaveExpense={(data, immediateSettle, installmentSplit) => {
@@ -1918,6 +2117,7 @@ export default function App() {
         isOpen={isUniversalQuickAddOpen}
         onClose={() => setIsUniversalQuickAddOpen(false)}
         accounts={accounts}
+        expenses={expenses}
         currency={settings.currency || 'MYR'}
         initialTab={universalQuickAddInitialTab}
         onAddExpense={(data, immediateSettle, installmentSplit) => {
@@ -1935,6 +2135,41 @@ export default function App() {
         onOpenReceiptCapture={() => {
           setIsUniversalQuickAddOpen(false);
           setIsReceiptCaptureOpen(true);
+        }}
+        quickPayTemplates={quickPayTemplates}
+        onSaveQuickPayTemplate={handleSaveQuickPayTemplate}
+        onSelectQuickPayForPay={(tpl) => {
+          setIsUniversalQuickAddOpen(false);
+          setSelectedQuickPayTemplate(tpl);
+          setIsQuickPayExecuteOpen(true);
+        }}
+      />
+
+      {/* Quick Pay Execution Modal (1-Click instant settlement) */}
+      <QuickPayExecuteModal
+        isOpen={isQuickPayExecuteOpen}
+        onClose={() => {
+          setIsQuickPayExecuteOpen(false);
+          setSelectedQuickPayTemplate(null);
+        }}
+        template={selectedQuickPayTemplate}
+        accounts={accounts}
+        currency={settings.currency || 'MYR'}
+        onExecuteSettlement={handleExecuteQuickPaySettlement}
+      />
+
+      {/* Quick Pay Templates Management Modal */}
+      <QuickPayManageModal
+        isOpen={isQuickPayManageOpen}
+        onClose={() => setIsQuickPayManageOpen(false)}
+        templates={quickPayTemplates}
+        accounts={accounts}
+        currency={settings.currency || 'MYR'}
+        onSaveTemplate={handleSaveQuickPayTemplate}
+        onDeleteTemplate={handleDeleteQuickPayTemplate}
+        onSelectForPay={(tpl) => {
+          setSelectedQuickPayTemplate(tpl);
+          setIsQuickPayExecuteOpen(true);
         }}
       />
 

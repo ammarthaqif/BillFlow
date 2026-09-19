@@ -9,13 +9,26 @@ import {
   ExpenseItem,
   StandingInstruction,
   BankScheduledTransaction,
-  ProPaymentRecord
+  ProPaymentRecord,
+  PartnerConnection,
+  PartnerConnectionRequest,
+  PartnerConnectionPermissions,
+  QuickPayTemplate
 } from '../types';
-import { INITIAL_ACCOUNTS, INITIAL_INSTALLMENTS, INITIAL_SETTINGS, INITIAL_EXPENSES, INITIAL_STANDING_INSTRUCTIONS, INITIAL_BANK_SCHEDULED_TRANSACTIONS } from '../data/seedData';
+import { 
+  INITIAL_ACCOUNTS, 
+  INITIAL_INSTALLMENTS, 
+  INITIAL_SETTINGS, 
+  INITIAL_EXPENSES, 
+  INITIAL_STANDING_INSTRUCTIONS, 
+  INITIAL_BANK_SCHEDULED_TRANSACTIONS,
+  INITIAL_QUICK_PAY_TEMPLATES
+} from '../data/seedData';
 
 const USERS_INDEX_KEY = 'billflow_registered_users';
 const ACTIVE_USER_KEY = 'billflow_active_user_id';
 const DB_PREFIX = 'billflow_user_db_';
+const PARTNER_REQUESTS_KEY = 'billflow_partner_connection_requests_v1';
 
 export class UserDatabaseService {
   /**
@@ -88,35 +101,522 @@ export class UserDatabaseService {
   }
 
   /**
-   * Returns users grouped by other households on this device
+   * @deprecated Household isolation is enforced. Viewing or switching to other households
+   * is strictly restricted for privacy and security. Returns an empty array.
    */
-  static getOtherHouseholdGroups(currentUser: UserProfile): Array<{
+  static getOtherHouseholdGroups(_currentUser: UserProfile): Array<{
     householdId: string;
     householdName: string;
     members: UserProfile[];
   }> {
-    const allUsers = this.getRegisteredUsers();
-    const currentHId = currentUser.householdId || this.normalizeHouseholdId(currentUser.householdName);
-    const currentHName = (currentUser.householdName || '').trim().toLowerCase();
+    // Strictly return empty list to enforce household isolation and prevent peeking into other households.
+    return [];
+  }
 
-    const otherUsers = allUsers.filter((u) => {
-      const uHId = u.householdId || this.normalizeHouseholdId(u.householdName);
-      const uHName = (u.householdName || '').trim().toLowerCase();
-      return uHId !== currentHId && (!currentHName || uHName !== currentHName);
-    });
+  /**
+   * Get all partner connection requests
+   */
+  static getPartnerConnectionRequests(): PartnerConnectionRequest[] {
+    try {
+      const raw = localStorage.getItem(PARTNER_REQUESTS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
 
-    const groupsMap = new Map<string, { householdId: string; householdName: string; members: UserProfile[] }>();
+  /**
+   * Save all partner connection requests
+   */
+  static savePartnerConnectionRequests(requests: PartnerConnectionRequest[]): void {
+    localStorage.setItem(PARTNER_REQUESTS_KEY, JSON.stringify(requests));
+  }
 
-    for (const u of otherUsers) {
-      const hId = u.householdId || this.normalizeHouseholdId(u.householdName);
-      const hName = u.householdName || 'Other Household';
-      if (!groupsMap.has(hId)) {
-        groupsMap.set(hId, { householdId: hId, householdName: hName, members: [] });
-      }
-      groupsMap.get(hId)!.members.push(u);
+  /**
+   * Get incoming pending requests for a user
+   */
+  static getIncomingPartnerRequests(user: UserProfile): PartnerConnectionRequest[] {
+    const all = this.getPartnerConnectionRequests();
+    const email = user.email.trim().toLowerCase();
+    const now = new Date().getTime();
+
+    return all.filter((r) => 
+      r.status === 'pending' &&
+      r.receiverEmail.trim().toLowerCase() === email &&
+      new Date(r.expiresAt).getTime() > now
+    );
+  }
+
+  /**
+   * Get outgoing pending requests sent by a user
+   */
+  static getOutgoingPartnerRequests(user: UserProfile): PartnerConnectionRequest[] {
+    const all = this.getPartnerConnectionRequests();
+    const now = new Date().getTime();
+
+    return all.filter((r) => 
+      r.senderId === user.id &&
+      r.status === 'pending' &&
+      new Date(r.expiresAt).getTime() > now
+    );
+  }
+
+  /**
+   * Send a connection request to spouse / partner with generated 6-digit verification code
+   */
+  static sendPartnerConnectionRequest(params: {
+    sender: UserProfile;
+    receiverEmail: string;
+    receiverRole?: FamilyRole;
+    permissions?: Partial<PartnerConnectionPermissions>;
+  }): PartnerConnectionRequest {
+    const { sender, receiverEmail, receiverRole, permissions } = params;
+    const cleanReceiverEmail = receiverEmail.trim().toLowerCase();
+    const cleanSenderEmail = sender.email.trim().toLowerCase();
+
+    if (!cleanReceiverEmail) {
+      throw new Error("Please provide your partner's email address.");
     }
 
-    return Array.from(groupsMap.values());
+    if (cleanReceiverEmail === cleanSenderEmail) {
+      throw new Error('You cannot send a partner connection request to yourself.');
+    }
+
+    const allRequests = this.getPartnerConnectionRequests();
+    
+    // Check if an active verified partner already exists
+    if (sender.linkedPartner && sender.linkedPartner.status === 'verified') {
+      throw new Error(`You are already linked to ${sender.linkedPartner.partnerName} (${sender.linkedPartner.partnerRole}). Disconnect existing partner before initiating a new connection.`);
+    }
+
+    // Check if receiver is already registered
+    const allUsers = this.getRegisteredUsers();
+    const registeredReceiver = allUsers.find((u) => u.email.trim().toLowerCase() === cleanReceiverEmail);
+
+    // Cancel any previous pending requests from this sender to the same receiver
+    const filteredRequests = allRequests.filter(
+      (r) => !(r.senderId === sender.id && r.receiverEmail.trim().toLowerCase() === cleanReceiverEmail && r.status === 'pending')
+    );
+
+    // Generate secure 6-digit PIN (e.g. 582914)
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+
+    const newRequest: PartnerConnectionRequest = {
+      id: `pconn_req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      senderId: sender.id,
+      senderName: sender.name,
+      senderEmail: sender.email,
+      senderRole: sender.familyRole,
+      senderHouseholdName: sender.householdName,
+      senderHouseholdId: sender.householdId || this.normalizeHouseholdId(sender.householdName),
+      receiverEmail: cleanReceiverEmail,
+      receiverName: registeredReceiver ? registeredReceiver.name : undefined,
+      receiverRole: receiverRole || (sender.familyRole === 'husband' ? 'wife' : sender.familyRole === 'wife' ? 'husband' : 'partner'),
+      verificationCode,
+      status: 'pending',
+      permissions: {
+        shareAccounts: permissions?.shareAccounts ?? true,
+        shareInstallments: permissions?.shareInstallments ?? true,
+        shareExpenses: permissions?.shareExpenses ?? true,
+        allowBidirectionalSync: permissions?.allowBidirectionalSync ?? true,
+      },
+      createdAt: now.toISOString(),
+      expiresAt,
+    };
+
+    filteredRequests.push(newRequest);
+    this.savePartnerConnectionRequests(filteredRequests);
+
+    return newRequest;
+  }
+
+  /**
+   * Verify 6-digit code and accept partner connection request (Dual-Party Acceptance)
+   */
+  static verifyAndAcceptPartnerRequest(params: {
+    requestId: string;
+    verificationCode: string;
+    receiver: UserProfile;
+  }): {
+    senderUser: UserProfile;
+    receiverUser: UserProfile;
+    connection: PartnerConnection;
+  } {
+    const { requestId, verificationCode, receiver } = params;
+    const cleanCode = (verificationCode || '').trim();
+
+    if (!cleanCode || cleanCode.length !== 6) {
+      throw new Error('Please enter the valid 6-digit verification PIN provided by your spouse.');
+    }
+
+    const allRequests = this.getPartnerConnectionRequests();
+    const reqIndex = allRequests.findIndex((r) => r.id === requestId);
+
+    if (reqIndex === -1) {
+      throw new Error('Connection request not found or has expired.');
+    }
+
+    const request = allRequests[reqIndex];
+
+    if (request.status !== 'pending') {
+      throw new Error(`This request has already been ${request.status}.`);
+    }
+
+    if (new Date(request.expiresAt).getTime() <= Date.now()) {
+      request.status = 'revoked';
+      this.savePartnerConnectionRequests(allRequests);
+      throw new Error('This connection request has expired. Please ask your spouse to generate a new invite.');
+    }
+
+    // Check receiver email match
+    if (request.receiverEmail.trim().toLowerCase() !== receiver.email.trim().toLowerCase()) {
+      throw new Error('This request was sent to a different email address.');
+    }
+
+    // Verify code strictly
+    if (request.verificationCode !== cleanCode) {
+      throw new Error('Verification PIN mismatch. Please check the 6-digit PIN with your spouse.');
+    }
+
+    const allUsers = this.getRegisteredUsers();
+    const senderIndex = allUsers.findIndex((u) => u.id === request.senderId);
+    const receiverIndex = allUsers.findIndex((u) => u.id === receiver.id);
+
+    if (senderIndex === -1) {
+      throw new Error('The sender profile was not found on this system.');
+    }
+
+    const senderUser = allUsers[senderIndex];
+    const receiverUser = receiverIndex !== -1 ? allUsers[receiverIndex] : receiver;
+
+    // Harmonize Household: Unify both partners into a shared household
+    const sharedHouseholdName = senderUser.householdName || receiverUser.householdName || 'My Family';
+    const sharedHouseholdId = senderUser.householdId || receiverUser.householdId || this.normalizeHouseholdId(sharedHouseholdName);
+
+    senderUser.householdName = sharedHouseholdName;
+    senderUser.householdId = sharedHouseholdId;
+    receiverUser.householdName = sharedHouseholdName;
+    receiverUser.householdId = sharedHouseholdId;
+
+    const connectionId = `pconn_${Date.now()}`;
+    const verifiedAt = new Date().toISOString();
+
+    const senderConnection: PartnerConnection = {
+      id: connectionId,
+      partnerUserId: receiverUser.id,
+      partnerName: receiverUser.name,
+      partnerEmail: receiverUser.email,
+      partnerRole: receiverUser.familyRole,
+      status: 'verified',
+      verifiedAt,
+      verificationCode: cleanCode,
+      sharedHouseholdName,
+      sharedHouseholdId,
+      permissions: request.permissions,
+      lastSyncedAt: undefined,
+    };
+
+    const receiverConnection: PartnerConnection = {
+      id: connectionId,
+      partnerUserId: senderUser.id,
+      partnerName: senderUser.name,
+      partnerEmail: senderUser.email,
+      partnerRole: senderUser.familyRole,
+      status: 'verified',
+      verifiedAt,
+      verificationCode: cleanCode,
+      sharedHouseholdName,
+      sharedHouseholdId,
+      permissions: request.permissions,
+      lastSyncedAt: undefined,
+    };
+
+    senderUser.linkedPartner = senderConnection;
+    receiverUser.linkedPartner = receiverConnection;
+
+    allUsers[senderIndex] = senderUser;
+    if (receiverIndex !== -1) {
+      allUsers[receiverIndex] = receiverUser;
+    } else {
+      allUsers.push(receiverUser);
+    }
+    localStorage.setItem(USERS_INDEX_KEY, JSON.stringify(allUsers));
+
+    // Update request state
+    request.status = 'accepted';
+    request.acceptedAt = verifiedAt;
+    allRequests[reqIndex] = request;
+    this.savePartnerConnectionRequests(allRequests);
+
+    return {
+      senderUser,
+      receiverUser,
+      connection: receiverConnection,
+    };
+  }
+
+  /**
+   * Decline / reject an incoming partner connection request
+   */
+  static rejectPartnerRequest(requestId: string, receiver: UserProfile): void {
+    const allRequests = this.getPartnerConnectionRequests();
+    const req = allRequests.find((r) => r.id === requestId);
+    if (!req) return;
+
+    if (req.receiverEmail.trim().toLowerCase() !== receiver.email.trim().toLowerCase()) {
+      throw new Error('Unauthorized to decline this request.');
+    }
+
+    req.status = 'rejected';
+    this.savePartnerConnectionRequests(allRequests);
+  }
+
+  /**
+   * Cancel / revoke an outgoing partner request
+   */
+  static cancelPartnerRequest(requestId: string, sender: UserProfile): void {
+    const allRequests = this.getPartnerConnectionRequests();
+    const req = allRequests.find((r) => r.id === requestId);
+    if (!req) return;
+
+    if (req.senderId !== sender.id) {
+      throw new Error('Unauthorized to cancel this request.');
+    }
+
+    req.status = 'revoked';
+    this.savePartnerConnectionRequests(allRequests);
+  }
+
+  /**
+   * Disconnect / Sever partner connection mutually
+   */
+  static disconnectPartner(userId: string): { currentUser: UserProfile; exPartnerUser?: UserProfile } {
+    const allUsers = this.getRegisteredUsers();
+    const userIdx = allUsers.findIndex((u) => u.id === userId);
+    if (userIdx === -1) {
+      throw new Error('User not found.');
+    }
+
+    const current = allUsers[userIdx];
+    const partnerId = current.linkedPartner?.partnerUserId;
+    current.linkedPartner = undefined;
+    allUsers[userIdx] = current;
+
+    let exPartnerUser: UserProfile | undefined;
+    if (partnerId) {
+      const partnerIdx = allUsers.findIndex((u) => u.id === partnerId);
+      if (partnerIdx !== -1) {
+        exPartnerUser = allUsers[partnerIdx];
+        exPartnerUser.linkedPartner = undefined;
+        allUsers[partnerIdx] = exPartnerUser;
+      }
+    }
+
+    localStorage.setItem(USERS_INDEX_KEY, JSON.stringify(allUsers));
+    return { currentUser: current, exPartnerUser };
+  }
+
+  /**
+   * 1-Click Sync Data between Verified Partners
+   */
+  static syncVerifiedPartnerData(currentUserId: string, partnerUserId: string): {
+    updatedDb: UserDedicatedDatabase;
+    accountsAdded: number;
+    installmentsAdded: number;
+    expensesAdded: number;
+  } {
+    const allUsers = this.getRegisteredUsers();
+    const currentUser = allUsers.find((u) => u.id === currentUserId);
+    const partnerUser = allUsers.find((u) => u.id === partnerUserId);
+
+    if (!currentUser || !partnerUser) {
+      throw new Error('Users not found for synchronization.');
+    }
+
+    // Verify dual-party connection
+    if (
+      currentUser.linkedPartner?.status !== 'verified' ||
+      currentUser.linkedPartner.partnerUserId !== partnerUserId ||
+      partnerUser.linkedPartner?.status !== 'verified' ||
+      partnerUser.linkedPartner.partnerUserId !== currentUserId
+    ) {
+      throw new Error('Both parties must have verified and accepted their partner connection to sync data.');
+    }
+
+    const currentDb = this.loadUserDatabase(currentUserId);
+    const partnerDb = this.loadUserDatabase(partnerUserId);
+
+    const now = new Date().toISOString();
+    let accountsAdded = 0;
+    let installmentsAdded = 0;
+    let expensesAdded = 0;
+
+    const existingAccIds = new Set(currentDb.accounts.map((a) => a.id));
+    const newAccounts: BillAccount[] = [...currentDb.accounts];
+
+    for (const pAcc of partnerDb.accounts) {
+      if (!existingAccIds.has(pAcc.id)) {
+        // Tag with partner ownership and harmonize household
+        newAccounts.push({
+          ...pAcc,
+          ownerName: `${partnerUser.name} (${partnerUser.familyRole})`,
+          ownerRole: partnerUser.familyRole,
+          householdId: currentDb.householdId,
+          householdName: currentDb.householdName,
+        });
+        existingAccIds.add(pAcc.id);
+        accountsAdded++;
+      }
+    }
+
+    const existingInstIds = new Set(currentDb.installments.map((i) => i.id));
+    const newInstallments: InstallmentPlan[] = [...currentDb.installments];
+
+    for (const pInst of partnerDb.installments) {
+      if (!existingInstIds.has(pInst.id)) {
+        newInstallments.push({
+          ...pInst,
+          ownerName: `${partnerUser.name} (${partnerUser.familyRole})`,
+          ownerRole: partnerUser.familyRole,
+          householdId: currentDb.householdId,
+          householdName: currentDb.householdName,
+        });
+        existingInstIds.add(pInst.id);
+        installmentsAdded++;
+      }
+    }
+
+    const existingExpIds = new Set((currentDb.expenses || []).map((e) => e.id));
+    const newExpenses: ExpenseItem[] = [...(currentDb.expenses || [])];
+
+    if (currentUser.linkedPartner.permissions.shareExpenses && partnerDb.expenses) {
+      for (const pExp of partnerDb.expenses) {
+        if (!existingExpIds.has(pExp.id)) {
+          newExpenses.push({
+            ...pExp,
+            ownerName: `${partnerUser.name} (${partnerUser.familyRole})`,
+            ownerRole: partnerUser.familyRole,
+            householdId: currentDb.householdId,
+            householdName: currentDb.householdName,
+          });
+          existingExpIds.add(pExp.id);
+          expensesAdded++;
+        }
+      }
+    }
+
+    // Update current DB
+    const updatedCurrentDb: UserDedicatedDatabase = {
+      ...currentDb,
+      accounts: newAccounts,
+      installments: newInstallments,
+      expenses: newExpenses,
+      lastUpdated: now,
+      version: currentDb.version + 1,
+    };
+    this.saveUserDatabase(updatedCurrentDb);
+
+    // If bidirectional sync is enabled, sync back into partnerDb
+    if (currentUser.linkedPartner.permissions.allowBidirectionalSync) {
+      const partnerExistingAccIds = new Set(partnerDb.accounts.map((a) => a.id));
+      const partnerNewAccounts = [...partnerDb.accounts];
+      for (const cAcc of currentDb.accounts) {
+        if (!partnerExistingAccIds.has(cAcc.id)) {
+          partnerNewAccounts.push({
+            ...cAcc,
+            ownerName: `${currentUser.name} (${currentUser.familyRole})`,
+            ownerRole: currentUser.familyRole,
+            householdId: partnerDb.householdId,
+            householdName: partnerDb.householdName,
+          });
+          partnerExistingAccIds.add(cAcc.id);
+        }
+      }
+
+      const partnerExistingInstIds = new Set(partnerDb.installments.map((i) => i.id));
+      const partnerNewInst = [...partnerDb.installments];
+      for (const cInst of currentDb.installments) {
+        if (!partnerExistingInstIds.has(cInst.id)) {
+          partnerNewInst.push({
+            ...cInst,
+            ownerName: `${currentUser.name} (${currentUser.familyRole})`,
+            ownerRole: currentUser.familyRole,
+            householdId: partnerDb.householdId,
+            householdName: partnerDb.householdName,
+          });
+          partnerExistingInstIds.add(cInst.id);
+        }
+      }
+
+      const updatedPartnerDb: UserDedicatedDatabase = {
+        ...partnerDb,
+        accounts: partnerNewAccounts,
+        installments: partnerNewInst,
+        lastUpdated: now,
+        version: partnerDb.version + 1,
+      };
+      this.saveUserDatabase(updatedPartnerDb);
+    }
+
+    // Update lastSyncedAt on both profiles
+    if (currentUser.linkedPartner) {
+      currentUser.linkedPartner.lastSyncedAt = now;
+      this.updateUserProfile(currentUser);
+    }
+    if (partnerUser.linkedPartner) {
+      partnerUser.linkedPartner.lastSyncedAt = now;
+      this.updateUserProfile(partnerUser);
+    }
+
+    return {
+      updatedDb: updatedCurrentDb,
+      accountsAdded,
+      installmentsAdded,
+      expensesAdded,
+    };
+  }
+
+  /**
+   * Check if switching to a target user is authorized
+   */
+  static canSwitchToUser(currentUser: UserProfile, targetUserId: string): { allowed: boolean; reason?: string } {
+    if (currentUser.id === targetUserId) {
+      return { allowed: true };
+    }
+
+    const allUsers = this.getRegisteredUsers();
+    const targetUser = allUsers.find((u) => u.id === targetUserId);
+    if (!targetUser) {
+      return { allowed: false, reason: 'Target profile not found on this device.' };
+    }
+
+    // Verify same household
+    const currentHId = currentUser.householdId || this.normalizeHouseholdId(currentUser.householdName);
+    const targetHId = targetUser.householdId || this.normalizeHouseholdId(targetUser.householdName);
+    if (currentHId !== targetHId) {
+      return { 
+        allowed: false, 
+        reason: 'Cross-household switching is blocked. You cannot view or switch to accounts from another household.' 
+      };
+    }
+
+    // Must be verified partner connection
+    const isVerifiedPartner = 
+      currentUser.linkedPartner?.status === 'verified' &&
+      currentUser.linkedPartner.partnerUserId === targetUserId &&
+      targetUser.linkedPartner?.status === 'verified' &&
+      targetUser.linkedPartner.partnerUserId === currentUser.id;
+
+    if (!isVerifiedPartner) {
+      return {
+        allowed: false,
+        reason: 'Dual-party verification required. Spouses must send, verify with the 6-digit PIN, and accept a Partner Connection before switching is permitted.'
+      };
+    }
+
+    return { allowed: true };
   }
 
   /**
@@ -379,6 +879,7 @@ export class UserDatabaseService {
       expenses: initialExpenses,
       standingInstructions: initialStandingInstructions,
       bankScheduledTransactions: [...INITIAL_BANK_SCHEDULED_TRANSACTIONS],
+      quickPayTemplates: [...INITIAL_QUICK_PAY_TEMPLATES],
       settings: { ...INITIAL_SETTINGS },
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -409,8 +910,14 @@ export class UserDatabaseService {
     if (raw) {
       try {
         const parsed: UserDedicatedDatabase = JSON.parse(raw);
-        if (parsed && parsed.settings) {
+        if (!parsed.settings) {
+          parsed.settings = { ...INITIAL_SETTINGS };
+        } else {
           parsed.settings.currency = parsed.settings.currency || 'MYR';
+          parsed.settings.allocatedCashForBills = parsed.settings.allocatedCashForBills ?? 3500;
+          parsed.settings.monthlyIncome = parsed.settings.monthlyIncome ?? 6500;
+          parsed.settings.paycheckDates = parsed.settings.paycheckDates || [1, 15];
+          parsed.settings.monthlySpendingCap = parsed.settings.monthlySpendingCap ?? 5000;
         }
         // Migration: ensure accounts have valid defaults and expenses/standing instructions array are present
         if (!parsed.expenses || parsed.expenses.length === 0) {
@@ -421,6 +928,9 @@ export class UserDatabaseService {
         }
         if (!parsed.bankScheduledTransactions) {
           parsed.bankScheduledTransactions = [...INITIAL_BANK_SCHEDULED_TRANSACTIONS];
+        }
+        if (!parsed.quickPayTemplates || parsed.quickPayTemplates.length === 0) {
+          parsed.quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
         }
         return parsed;
       } catch (err) {
@@ -444,6 +954,7 @@ export class UserDatabaseService {
       expenses: INITIAL_EXPENSES.slice(0, 6),
       standingInstructions: INITIAL_STANDING_INSTRUCTIONS.slice(0, 2),
       bankScheduledTransactions: [...INITIAL_BANK_SCHEDULED_TRANSACTIONS],
+      quickPayTemplates: [...INITIAL_QUICK_PAY_TEMPLATES],
       settings: INITIAL_SETTINGS,
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -522,6 +1033,7 @@ export class UserDatabaseService {
         accounts: selectedAccounts,
         installments: selectedInstallments,
         expenses: selectedExpenses,
+        quickPayTemplates: db.quickPayTemplates || [],
         settings: includeOptions.includeSettings ? db.settings : undefined,
       },
       summary: {
@@ -822,5 +1334,95 @@ export class UserDatabaseService {
 
     this.saveUserDatabase(updatedDb);
     return updatedDb;
+  }
+
+  /**
+   * Save or update a Quick Pay Template in the user's dedicated database
+   */
+  static saveQuickPayTemplate(
+    db: UserDedicatedDatabase,
+    template: QuickPayTemplate
+  ): { updatedDb: UserDedicatedDatabase; savedTemplate: QuickPayTemplate } {
+    const existing = db.quickPayTemplates || [];
+    const index = existing.findIndex((t) => t.id === template.id);
+
+    let updatedTemplates: QuickPayTemplate[];
+    let savedTemplate: QuickPayTemplate;
+
+    if (index >= 0) {
+      savedTemplate = { ...existing[index], ...template };
+      updatedTemplates = [...existing];
+      updatedTemplates[index] = savedTemplate;
+    } else {
+      savedTemplate = {
+        ...template,
+        id: template.id || `qpt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        createdAt: template.createdAt || new Date().toISOString(),
+        usageCount: template.usageCount || 0,
+      };
+      updatedTemplates = [savedTemplate, ...existing];
+    }
+
+    const updatedDb: UserDedicatedDatabase = {
+      ...db,
+      quickPayTemplates: updatedTemplates,
+      lastUpdated: new Date().toISOString(),
+      version: db.version + 1,
+    };
+
+    this.saveUserDatabase(updatedDb);
+    return { updatedDb, savedTemplate };
+  }
+
+  /**
+   * Delete a Quick Pay Template
+   */
+  static deleteQuickPayTemplate(
+    db: UserDedicatedDatabase,
+    templateId: string
+  ): { updatedDb: UserDedicatedDatabase; deleted: boolean } {
+    const existing = db.quickPayTemplates || [];
+    const filtered = existing.filter((t) => t.id !== templateId);
+    const deleted = filtered.length !== existing.length;
+
+    const updatedDb: UserDedicatedDatabase = {
+      ...db,
+      quickPayTemplates: filtered,
+      lastUpdated: new Date().toISOString(),
+      version: db.version + 1,
+    };
+
+    this.saveUserDatabase(updatedDb);
+    return { updatedDb, deleted };
+  }
+
+  /**
+   * Record usage of a Quick Pay Template (increments usage count and sets lastUsedAt)
+   */
+  static recordQuickPayUsage(
+    db: UserDedicatedDatabase,
+    templateId: string
+  ): { updatedDb: UserDedicatedDatabase } {
+    const existing = db.quickPayTemplates || [];
+    const updated = existing.map((t) => {
+      if (t.id === templateId) {
+        return {
+          ...t,
+          usageCount: (t.usageCount || 0) + 1,
+          lastUsedAt: new Date().toISOString(),
+        };
+      }
+      return t;
+    });
+
+    const updatedDb: UserDedicatedDatabase = {
+      ...db,
+      quickPayTemplates: updated,
+      lastUpdated: new Date().toISOString(),
+      version: db.version + 1,
+    };
+
+    this.saveUserDatabase(updatedDb);
+    return { updatedDb };
   }
 }

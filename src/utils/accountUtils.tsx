@@ -154,6 +154,13 @@ export const SETTLEMENT_METHODS_CONFIG: {
     icon: QrCode,
   },
   {
+    id: 'jompay',
+    name: 'JomPAY Malaysian Biller',
+    description: 'National bill payment scheme using Biller Code & Ref-1',
+    badge: 'National Standard',
+    icon: Receipt,
+  },
+  {
     id: 'bank_transfer',
     name: 'Bank Transfer / GIRO',
     description: 'Electronic funds transfer directly to card/loan account',
@@ -177,12 +184,13 @@ export const SETTLEMENT_METHODS_CONFIG: {
 ];
 
 export const EXPENSE_CATEGORIES_LIST: ExpenseCategory[] = [
+  'QR Payment',
+  'Dining & Groceries',
   'Phone & Mobile',
   'Internet & Broadband',
   'Utilities (Electricity, Water, IWK)',
   'Entertainment & Streaming',
   'Retail & Shopping',
-  'Dining & Groceries',
   'Electronics & Gadgets',
   'Travel & Transit',
   'Vehicle & Fuel',
@@ -195,6 +203,8 @@ export const EXPENSE_CATEGORIES_LIST: ExpenseCategory[] = [
 
 export function getExpenseCategoryIcon(category: ExpenseCategory, className = 'w-4 h-4') {
   switch (category) {
+    case 'QR Payment':
+      return <QrCode className={className} />;
     case 'Phone & Mobile':
       return <Smartphone className={className} />;
     case 'Internet & Broadband':
@@ -242,6 +252,19 @@ export interface DayToDayBillPreset {
 }
 
 export const POPULAR_BILL_PRESETS: DayToDayBillPreset[] = [
+  {
+    id: 'preset-duitnow-qr',
+    name: 'DuitNow QR Payment',
+    shortLabel: 'DuitNow QR',
+    category: 'QR Payment',
+    defaultMerchant: 'DuitNow QR Merchant',
+    defaultTitle: 'DuitNow QR Merchant Payment',
+    typicalAmount: 45.00,
+    icon: QrCode,
+    color: '#ec4899',
+    preferredPaymentMode: 'duitnow_qr',
+    defaultRepayment: 'lump_sum',
+  },
   {
     id: 'preset-tnb',
     name: 'Electricity (TNB)',
