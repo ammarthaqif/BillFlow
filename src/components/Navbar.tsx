@@ -7,7 +7,8 @@ import {
   Database,
   ArrowRightLeft,
   LogOut,
-  Landmark
+  Landmark,
+  RotateCcw
 } from 'lucide-react';
 import { CustomAlert, UserProfile } from '../types';
 import { CurrencyCode } from '../utils/currency';
@@ -25,6 +26,7 @@ interface NavbarProps {
   onOpenBankAdvisor?: () => void;
   onRecordExpense?: () => void;
   onOpenQuickAdd?: (tab?: 'expense' | 'bank_balance' | 'account' | 'recurring') => void;
+  onOpenResetDatabase?: () => void;
   onLogout: () => void;
   onSyncAll: () => void;
   isSyncing: boolean;
@@ -43,6 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenBankAdvisor,
   onRecordExpense,
   onOpenQuickAdd,
+  onOpenResetDatabase,
   onLogout,
   onSyncAll,
   isSyncing,
@@ -181,6 +184,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 </div>
               </button>
+
+              {onOpenResetDatabase && (
+                <button
+                  type="button"
+                  onClick={onOpenResetDatabase}
+                  className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Reset database for fresh restart"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              )}
 
               <button
                 onClick={onLogout}

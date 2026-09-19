@@ -33,7 +33,8 @@ export const QuickPayStrip: React.FC<QuickPayStripProps> = ({
   onOpenCreate,
 }) => {
   // Sort templates: prioritize recently used or most used
-  const displayTemplates = [...templates].sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0)).slice(0, 6);
+  const safeTemplates = Array.isArray(templates) ? templates : [];
+  const displayTemplates = [...safeTemplates].sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0)).slice(0, 6);
 
   return (
     <div 

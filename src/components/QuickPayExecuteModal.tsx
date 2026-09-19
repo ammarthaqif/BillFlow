@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Zap, 
@@ -66,11 +66,26 @@ export const QuickPayExecuteModal: React.FC<QuickPayExecuteModalProps> = ({
   const [settlementMethod, setSettlementMethod] = useState<SettlementMethod>(template.settlementMethod || 'jompay');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [referenceNumber, setReferenceNumber] = useState<string>(
-    () => `QP-${template.title.slice(0, 3).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
+    () => `QP-${(template.title || 'BILL').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'QP'}-${Date.now().toString(36).toUpperCase()}`
   );
-  const [notes, setNotes] = useState<string>(template.notes || `Settled via Quick Pay: ${template.title}`);
+  const [notes, setNotes] = useState<string>(template.notes || `Settled via Quick Pay: ${template.title || 'Bill'}`);
   const [copiedRef, setCopiedRef] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!template) return;
+    const srcAcc = accounts.find((a) => a.id === template.sourceAccountId) || bankAccounts[0] || accounts[0];
+    const defAmt = template.defaultAmount ?? 0;
+    setAmount(defAmt);
+    setAmountInput(defAmt.toString());
+    setSelectedSourceAccountId(srcAcc?.id || '');
+    setSettlementMethod(template.settlementMethod || 'jompay');
+    setDate(new Date().toISOString().split('T')[0]);
+    const safeTitle = (template.title || 'BILL').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'QP';
+    setReferenceNumber(`QP-${safeTitle}-${Date.now().toString(36).toUpperCase()}`);
+    setNotes(template.notes || `Settled via Quick Pay: ${template.title || 'Bill'}`);
+    setCopiedRef(false);
+  }, [template?.id]);
 
   const selectedSourceAccount = accounts.find((a) => a.id === selectedSourceAccountId);
 

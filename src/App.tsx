@@ -60,6 +60,7 @@ import { EditAccountModal } from './components/EditAccountModal';
 import { ExpenseModal } from './components/ExpenseModal';
 import { QuickPayExecuteModal } from './components/QuickPayExecuteModal';
 import { QuickPayManageModal } from './components/QuickPayManageModal';
+import { DatabaseResetModal } from './components/DatabaseResetModal';
 
 import { 
   Sliders, 
@@ -82,7 +83,8 @@ import {
   Landmark,
   Edit3,
   Layers,
-  Sun
+  Sun,
+  RotateCcw
 } from 'lucide-react';
 
 export default function App() {
@@ -156,6 +158,9 @@ export default function App() {
   const [selectedQuickPayTemplate, setSelectedQuickPayTemplate] = useState<QuickPayTemplate | null>(null);
   const [isQuickPayManageOpen, setIsQuickPayManageOpen] = useState(false);
 
+  // Database Reset Modal state
+  const [isDatabaseResetOpen, setIsDatabaseResetOpen] = useState(false);
+
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('Just now');
@@ -193,7 +198,7 @@ export default function App() {
       setScheduledScheduleIds(new Set(db.scheduledScheduleIds || []));
       setAlertThresholds(db.alertThresholds || [7, 3, 1]);
       setQuickPayTemplates(
-        db.quickPayTemplates && db.quickPayTemplates.length > 0
+        db.quickPayTemplates && Array.isArray(db.quickPayTemplates)
           ? db.quickPayTemplates
           : INITIAL_QUICK_PAY_TEMPLATES
       );
@@ -305,17 +310,21 @@ export default function App() {
     setUserDb(null);
   };
 
-  // Database Updated from Family Sync
+  // Database Updated from Family Sync or Fresh Reset
   const handleDatabaseUpdated = (updatedDb: UserDedicatedDatabase) => {
     setUserDb(updatedDb);
     setAccounts(updatedDb.accounts || []);
     setInstallments(updatedDb.installments || []);
-    if (updatedDb.bankScheduledTransactions) {
-      setBankScheduledTransactions(updatedDb.bankScheduledTransactions);
-    }
-    if (updatedDb.quickPayTemplates) {
-      setQuickPayTemplates(updatedDb.quickPayTemplates);
-    }
+    setExpenses(updatedDb.expenses || []);
+    setStandingInstructions(updatedDb.standingInstructions || []);
+    setBankScheduledTransactions(updatedDb.bankScheduledTransactions || []);
+    setQuickPayTemplates(
+      updatedDb.quickPayTemplates && Array.isArray(updatedDb.quickPayTemplates)
+        ? updatedDb.quickPayTemplates
+        : []
+    );
+    setPaidScheduleIds(new Set(updatedDb.paidScheduleIds || []));
+    setScheduledScheduleIds(new Set(updatedDb.scheduledScheduleIds || []));
     if (updatedDb?.settings) {
       setSettings(updatedDb.settings);
       setAllocatedCash(updatedDb.settings.allocatedCashForBills ?? 3500);
@@ -324,11 +333,21 @@ export default function App() {
     setAutoSaveStatus('Synchronized');
   };
 
+  const handleDatabaseReset = (freshDb: UserDedicatedDatabase) => {
+    handleDatabaseUpdated(freshDb);
+    setAutoSaveStatus('Database Reset to Fresh Restart');
+  };
+
+  const handleFactoryReset = () => {
+    handleLogout();
+  };
+
   // Quick Pay Template Handlers
   const handleSaveQuickPayTemplate = (template: QuickPayTemplate) => {
     if (!currentUser) return;
     const updated = UserDatabaseService.saveQuickPayTemplate(currentUser.id, template);
-    setQuickPayTemplates(updated);
+    const safeUpdated = Array.isArray(updated) ? updated : [];
+    setQuickPayTemplates(safeUpdated);
     triggerAutoSave(
       accounts,
       installments,
@@ -338,14 +357,15 @@ export default function App() {
       expenses,
       standingInstructions,
       bankScheduledTransactions,
-      updated
+      safeUpdated
     );
   };
 
   const handleDeleteQuickPayTemplate = (templateId: string) => {
     if (!currentUser) return;
     const updated = UserDatabaseService.deleteQuickPayTemplate(currentUser.id, templateId);
-    setQuickPayTemplates(updated);
+    const safeUpdated = Array.isArray(updated) ? updated : [];
+    setQuickPayTemplates(safeUpdated);
     triggerAutoSave(
       accounts,
       installments,
@@ -355,16 +375,20 @@ export default function App() {
       expenses,
       standingInstructions,
       bankScheduledTransactions,
-      updated
+      safeUpdated
     );
   };
 
   const handleExecuteQuickPaySettlement = (
     template: QuickPayTemplate,
     settlementDetails: {
-      sourceAccountId: string;
-      amountPaid: number;
-      referenceCode: string;
+      sourceAccountId?: string;
+      amount?: number;
+      amountPaid?: number;
+      settlementMethod?: SettlementMethod;
+      referenceNumber?: string;
+      referenceCode?: string;
+      date?: string;
       notes?: string;
     }
   ) => {
@@ -372,28 +396,32 @@ export default function App() {
 
     // 1. Record template usage
     const updatedTemplates = UserDatabaseService.recordQuickPayUsage(currentUser.id, template.id);
-    setQuickPayTemplates(updatedTemplates);
+    const safeTemplates = Array.isArray(updatedTemplates) ? updatedTemplates : quickPayTemplates;
+    setQuickPayTemplates(safeTemplates);
 
-    // 2. Identify funding account
-    const sourceAcc = accounts.find((a) => a.id === settlementDetails.sourceAccountId);
+    // 2. Determine deduction amount & funding account
+    const amountToDeduct = settlementDetails.amount ?? settlementDetails.amountPaid ?? template.defaultAmount ?? 0;
+    const fundingAccountId = settlementDetails.sourceAccountId || template.sourceAccountId || (accounts.find((a) => a.type === 'bank_account')?.id);
+    const sourceAcc = accounts.find((a) => a.id === fundingAccountId);
+    const refCode = settlementDetails.referenceNumber || settlementDetails.referenceCode || `QP-${Date.now().toString(36).toUpperCase()}`;
 
     // 3. Create settled expense item in ledger
     const newExpense: ExpenseItem = {
       id: `exp-qpay-${Date.now().toString(36)}`,
-      accountId: settlementDetails.sourceAccountId,
+      accountId: fundingAccountId || (accounts[0]?.id || 'direct_payment'),
       accountName: sourceAcc ? sourceAcc.name : (template.sourceAccountName || 'Direct Payment'),
       accountType: sourceAcc ? sourceAcc.type : 'bank_account',
       title: `${template.title} (${template.beneficiary})`,
       category: template.category,
-      amount: settlementDetails.amountPaid,
-      date: new Date().toISOString().split('T')[0],
+      amount: amountToDeduct,
+      date: settlementDetails.date || new Date().toISOString().split('T')[0],
       status: 'settled',
       settledAt: new Date().toISOString(),
-      settlementMethod: template.settlementMethod,
-      settlementReference: settlementDetails.referenceCode,
-      settledFromAccountId: settlementDetails.sourceAccountId,
-      paymentMode: template.paymentMode,
-      notes: settlementDetails.notes || `Quick Pay: ${template.beneficiaryAccountOrRef} • Ref: ${settlementDetails.referenceCode}`,
+      settlementMethod: settlementDetails.settlementMethod || template.settlementMethod || 'jompay',
+      settlementReference: refCode,
+      settledFromAccountId: fundingAccountId,
+      paymentMode: template.paymentMode || 'cash',
+      notes: settlementDetails.notes || `Quick Pay: ${template.beneficiaryAccountOrRef} • Ref: ${refCode}`,
       ownerName: currentUser.name,
       ownerRole: currentUser.familyRole,
     };
@@ -403,17 +431,19 @@ export default function App() {
 
     // 4. Update account balances
     let nextAccounts = [...accounts];
-    const targetAccIndex = nextAccounts.findIndex((a) => a.id === settlementDetails.sourceAccountId);
-    if (targetAccIndex !== -1) {
-      const acc = nextAccounts[targetAccIndex];
-      if (acc.type === 'bank_account') {
-        nextAccounts[targetAccIndex] = {
-          ...acc,
-          totalBalance: Math.max(0, Math.round((acc.totalBalance - settlementDetails.amountPaid) * 100) / 100),
-          lastSyncedAt: new Date().toISOString(),
-        };
+    if (fundingAccountId) {
+      const targetAccIndex = nextAccounts.findIndex((a) => a.id === fundingAccountId);
+      if (targetAccIndex !== -1) {
+        const acc = nextAccounts[targetAccIndex];
+        if (acc.type === 'bank_account') {
+          nextAccounts[targetAccIndex] = {
+            ...acc,
+            totalBalance: Math.max(0, Math.round(((acc.totalBalance || 0) - amountToDeduct) * 100) / 100),
+            lastSyncedAt: new Date().toISOString(),
+          };
+        }
+        setAccounts(nextAccounts);
       }
-      setAccounts(nextAccounts);
     }
 
     triggerAutoSave(
@@ -425,7 +455,7 @@ export default function App() {
       nextExpenses,
       standingInstructions,
       bankScheduledTransactions,
-      updatedTemplates
+      safeTemplates
     );
   };
 
@@ -1300,6 +1330,7 @@ export default function App() {
           setUniversalQuickAddInitialTab(tab || 'expense');
           setIsUniversalQuickAddOpen(true);
         }}
+        onOpenResetDatabase={() => setIsDatabaseResetOpen(true)}
         onLogout={handleLogout}
         onSyncAll={() => handleSyncAll()}
         isSyncing={isSyncing}
@@ -1366,6 +1397,15 @@ export default function App() {
             >
               <ArrowRightLeft className="w-3 h-3" />
               <span>Sync with Family</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsDatabaseResetOpen(true)}
+              className="text-rose-400 hover:text-rose-300 font-medium cursor-pointer flex items-center gap-1 hover:underline text-[11px]"
+              title="Reset database for fresh restart"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset DB</span>
             </button>
           </div>
         </div>
@@ -1997,6 +2037,7 @@ export default function App() {
           onDatabaseUpdated={handleDatabaseUpdated}
           onSwitchUser={handleSwitchUser}
           onUserUpdated={(updatedUser) => setCurrentUser(updatedUser)}
+          onOpenResetDatabase={() => setIsDatabaseResetOpen(true)}
         />
       )}
 
@@ -2172,6 +2213,17 @@ export default function App() {
           setIsQuickPayExecuteOpen(true);
         }}
       />
+
+      {/* Database Fresh Restart Modal */}
+      {currentUser && (
+        <DatabaseResetModal
+          isOpen={isDatabaseResetOpen}
+          onClose={() => setIsDatabaseResetOpen(false)}
+          currentUser={currentUser}
+          onDatabaseReset={handleDatabaseReset}
+          onFactoryReset={handleFactoryReset}
+        />
+      )}
 
       {/* Floating Quick Action Button for fast single-click action across any tab */}
       <button

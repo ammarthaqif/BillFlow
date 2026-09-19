@@ -107,7 +107,8 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
     if (!title.trim() || !beneficiary.trim()) return;
 
     const selectedAcc = accounts.find((a) => a.id === sourceAccountId);
-    const existing = editingTemplateId ? templates.find((t) => t.id === editingTemplateId) : null;
+    const safeList = Array.isArray(templates) ? templates : [];
+    const existing = editingTemplateId ? safeList.find((t) => t.id === editingTemplateId) : null;
 
     const templateToSave: QuickPayTemplate = {
       id: editingTemplateId || `qpt-${Date.now().toString(36)}`,
@@ -134,11 +135,17 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
   };
 
   // Filter templates
-  const filteredTemplates = templates.filter((t) => {
+  const safeTemplates = Array.isArray(templates) ? templates : [];
+  const filteredTemplates = safeTemplates.filter((t) => {
+    if (!t) return false;
+    const titleStr = (t.title || '').toLowerCase();
+    const benStr = (t.beneficiary || '').toLowerCase();
+    const refStr = (t.beneficiaryAccountOrRef || '').toLowerCase();
+    const q = searchQuery.toLowerCase();
     const matchesSearch = 
-      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.beneficiary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.beneficiaryAccountOrRef.toLowerCase().includes(searchQuery.toLowerCase());
+      titleStr.includes(q) ||
+      benStr.includes(q) ||
+      refStr.includes(q);
     const matchesCategory = selectedCategoryFilter === 'all' || t.category === selectedCategoryFilter;
     return matchesSearch && matchesCategory;
   });
@@ -447,8 +454,11 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
                               <div className="flex items-center gap-1">
                                 <button
                                   type="button"
-                                  onClick={() => onDeleteTemplate(template.id)}
-                                  className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-[10px] font-bold text-white transition-colors"
+                                  onClick={() => {
+                                    onDeleteTemplate(template.id);
+                                    setDeleteConfirmId(null);
+                                  }}
+                                  className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-[10px] font-bold text-white transition-colors cursor-pointer"
                                 >
                                   Confirm
                                 </button>

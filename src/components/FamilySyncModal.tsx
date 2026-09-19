@@ -37,6 +37,7 @@ interface FamilySyncModalProps {
   onDatabaseUpdated: (updatedDb: UserDedicatedDatabase) => void;
   onSwitchUser: (newUser: UserProfile) => void;
   onUserUpdated?: (updatedUser: UserProfile) => void;
+  onOpenResetDatabase?: () => void;
 }
 
 export function FamilySyncModal({
@@ -47,6 +48,7 @@ export function FamilySyncModal({
   onDatabaseUpdated,
   onSwitchUser,
   onUserUpdated,
+  onOpenResetDatabase,
 }: FamilySyncModalProps) {
   const [activeTab, setActiveTab] = useState<'household' | 'import' | 'export'>('household');
   const [, setRefreshKey] = useState(0);
@@ -938,6 +940,31 @@ export function FamilySyncModal({
                   <strong className="text-slate-300">Strict Household Privacy: </strong>
                   Profiles from other registered households are completely hidden from view. Switching across households is disallowed. To access an account from another household, please log out and sign in with authorized credentials.
                 </div>
+              </div>
+
+              {/* Database Maintenance & Fresh Restart */}
+              <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-rose-950/40 text-rose-400 border border-rose-800/40">
+                    <RefreshCw className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white">Database Fresh Restart</div>
+                    <div className="text-[10px] text-slate-400">Clear partition or re-seed with fresh Malaysian starter defaults.</div>
+                  </div>
+                </div>
+                {onOpenResetDatabase && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenResetDatabase();
+                    }}
+                    className="py-1.5 px-3 rounded-lg bg-rose-950/60 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Reset Database
+                  </button>
+                )}
               </div>
 
               {switchDeniedReason && (

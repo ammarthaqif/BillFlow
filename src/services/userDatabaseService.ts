@@ -768,6 +768,7 @@ export class UserDatabaseService {
   static registerUser(params: {
     name: string;
     email: string;
+    passphrase?: string;
     familyRole: FamilyRole;
     householdName?: string;
     householdId?: string;
@@ -789,6 +790,7 @@ export class UserDatabaseService {
       id: userId,
       name: params.name.trim(),
       email: params.email.trim().toLowerCase(),
+      passphrase: params.passphrase?.trim() || undefined,
       familyRole: params.familyRole,
       householdName,
       householdId,
@@ -929,7 +931,7 @@ export class UserDatabaseService {
         if (!parsed.bankScheduledTransactions) {
           parsed.bankScheduledTransactions = [...INITIAL_BANK_SCHEDULED_TRANSACTIONS];
         }
-        if (!parsed.quickPayTemplates || parsed.quickPayTemplates.length === 0) {
+        if (!parsed.quickPayTemplates || !Array.isArray(parsed.quickPayTemplates)) {
           parsed.quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
         }
         return parsed;
@@ -991,6 +993,176 @@ export class UserDatabaseService {
       });
     } catch {
       // Graceful offline fallback
+    }
+  }
+
+  /**
+   * Reset user's password / passphrase
+   */
+  static resetUserPassphrase(email: string, newPassphrase: string): UserProfile {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = newPassphrase.trim();
+    if (!cleanEmail) {
+      throw new Error('Please provide your registered email address.');
+    }
+    if (!cleanPass || cleanPass.length < 3) {
+      throw new Error('Passphrase must be at least 3 characters long.');
+    }
+
+    const users = this.getRegisteredUsers();
+    const user = users.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (!user) {
+      throw new Error(`No registered account found for ${cleanEmail}.`);
+    }
+
+    user.passphrase = cleanPass;
+    this.updateUserProfile(user);
+    return user;
+  }
+
+  /**
+   * Verify credentials for login
+   */
+  static verifyCredentials(email: string, passphrase: string): { valid: boolean; error?: string; user?: UserProfile } {
+    const cleanEmail = email.trim().toLowerCase();
+    const users = this.getRegisteredUsers();
+    const user = users.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (!user) {
+      return { valid: false, error: `No registered account found for ${cleanEmail}.` };
+    }
+
+    // If user has a passphrase configured, verify it
+    if (user.passphrase && user.passphrase.trim() !== '') {
+      if (user.passphrase !== passphrase.trim()) {
+        return { 
+          valid: false, 
+          error: 'Incorrect security passphrase. Click "Forgot Passphrase?" to reset it.',
+          user 
+        };
+      }
+    }
+
+    return { valid: true, user };
+  }
+
+  /**
+   * Reset a user's dedicated database for a fresh restart
+   */
+  static resetUserDatabase(
+    userId: string, 
+    template: 'standard' | 'wife_starter' | 'blank' = 'standard'
+  ): UserDedicatedDatabase {
+    const users = this.getRegisteredUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) {
+      throw new Error(`User with ID ${userId} not found.`);
+    }
+
+    const householdId = user.householdId || this.normalizeHouseholdId(user.householdName);
+    const householdName = user.householdName || 'My Family';
+
+    let accounts: BillAccount[] = [];
+    let installments: InstallmentPlan[] = [];
+    let expenses: ExpenseItem[] = [];
+    let standingInstructions: StandingInstruction[] = [];
+    let quickPayTemplates: QuickPayTemplate[] = [];
+
+    if (template === 'wife_starter') {
+      accounts = INITIAL_ACCOUNTS.slice(2, 5).map((a) => ({
+        ...a,
+        id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+        householdId,
+        householdName,
+      }));
+      installments = INITIAL_INSTALLMENTS.slice(1, 3).map((i) => ({
+        ...i,
+        id: `inst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+        householdId,
+        householdName,
+      }));
+      expenses = INITIAL_EXPENSES.filter((e) => e.ownerRole !== 'husband').slice(0, 5).map((e) => ({
+        ...e,
+        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+        householdId,
+        householdName,
+      }));
+      standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(1, 3);
+      quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
+    } else if (template === 'standard') {
+      accounts = INITIAL_ACCOUNTS.slice(0, 3).map((a) => ({
+        ...a,
+        id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+        householdId,
+        householdName,
+      }));
+      installments = INITIAL_INSTALLMENTS.slice(0, 2).map((i) => ({
+        ...i,
+        id: `inst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+        householdId,
+        householdName,
+      }));
+      expenses = INITIAL_EXPENSES.slice(0, 6).map((e) => ({
+        ...e,
+        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+        householdId,
+        householdName,
+      }));
+      standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
+      quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
+    } // for 'blank', they remain empty arrays []
+
+    const resetDb: UserDedicatedDatabase = {
+      databaseId: user.databaseId,
+      userId,
+      userEmail: user.email,
+      householdId,
+      householdName,
+      lastUpdated: new Date().toISOString(),
+      version: 1,
+      accounts,
+      installments,
+      expenses,
+      standingInstructions,
+      bankScheduledTransactions: template === 'blank' ? [] : [...INITIAL_BANK_SCHEDULED_TRANSACTIONS],
+      quickPayTemplates,
+      settings: { ...INITIAL_SETTINGS, allocatedCashForBills: template === 'blank' ? 0 : 3500 },
+      paidScheduleIds: [],
+      scheduledScheduleIds: [],
+      alertThresholds: [7, 3, 1],
+    };
+
+    localStorage.setItem(`${DB_PREFIX}${userId}`, JSON.stringify(resetDb));
+    this.syncDatabaseToBackend(resetDb).catch(() => {});
+    return resetDb;
+  }
+
+  /**
+   * Factory reset all user databases and registered profiles for total fresh start
+   */
+  static factoryResetAllData(): void {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('billflow_') || key.startsWith(DB_PREFIX))) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+    } catch (e) {
+      console.error('Failed to clear localStorage during factory reset:', e);
     }
   }
 
@@ -1340,10 +1512,13 @@ export class UserDatabaseService {
    * Save or update a Quick Pay Template in the user's dedicated database
    */
   static saveQuickPayTemplate(
-    db: UserDedicatedDatabase,
+    target: string | UserDedicatedDatabase,
     template: QuickPayTemplate
-  ): { updatedDb: UserDedicatedDatabase; savedTemplate: QuickPayTemplate } {
-    const existing = db.quickPayTemplates || [];
+  ): QuickPayTemplate[] {
+    const db: UserDedicatedDatabase = typeof target === 'string' 
+      ? this.loadUserDatabase(target) 
+      : target;
+    const existing = Array.isArray(db.quickPayTemplates) ? db.quickPayTemplates : [];
     const index = existing.findIndex((t) => t.id === template.id);
 
     let updatedTemplates: QuickPayTemplate[];
@@ -1367,43 +1542,48 @@ export class UserDatabaseService {
       ...db,
       quickPayTemplates: updatedTemplates,
       lastUpdated: new Date().toISOString(),
-      version: db.version + 1,
+      version: (db.version || 1) + 1,
     };
 
     this.saveUserDatabase(updatedDb);
-    return { updatedDb, savedTemplate };
+    return updatedTemplates;
   }
 
   /**
    * Delete a Quick Pay Template
    */
   static deleteQuickPayTemplate(
-    db: UserDedicatedDatabase,
+    target: string | UserDedicatedDatabase,
     templateId: string
-  ): { updatedDb: UserDedicatedDatabase; deleted: boolean } {
-    const existing = db.quickPayTemplates || [];
+  ): QuickPayTemplate[] {
+    const db: UserDedicatedDatabase = typeof target === 'string' 
+      ? this.loadUserDatabase(target) 
+      : target;
+    const existing = Array.isArray(db.quickPayTemplates) ? db.quickPayTemplates : [];
     const filtered = existing.filter((t) => t.id !== templateId);
-    const deleted = filtered.length !== existing.length;
 
     const updatedDb: UserDedicatedDatabase = {
       ...db,
       quickPayTemplates: filtered,
       lastUpdated: new Date().toISOString(),
-      version: db.version + 1,
+      version: (db.version || 1) + 1,
     };
 
     this.saveUserDatabase(updatedDb);
-    return { updatedDb, deleted };
+    return filtered;
   }
 
   /**
    * Record usage of a Quick Pay Template (increments usage count and sets lastUsedAt)
    */
   static recordQuickPayUsage(
-    db: UserDedicatedDatabase,
+    target: string | UserDedicatedDatabase,
     templateId: string
-  ): { updatedDb: UserDedicatedDatabase } {
-    const existing = db.quickPayTemplates || [];
+  ): QuickPayTemplate[] {
+    const db: UserDedicatedDatabase = typeof target === 'string' 
+      ? this.loadUserDatabase(target) 
+      : target;
+    const existing = Array.isArray(db.quickPayTemplates) ? db.quickPayTemplates : [];
     const updated = existing.map((t) => {
       if (t.id === templateId) {
         return {
@@ -1419,10 +1599,10 @@ export class UserDatabaseService {
       ...db,
       quickPayTemplates: updated,
       lastUpdated: new Date().toISOString(),
-      version: db.version + 1,
+      version: (db.version || 1) + 1,
     };
 
     this.saveUserDatabase(updatedDb);
-    return { updatedDb };
+    return updated;
   }
 }

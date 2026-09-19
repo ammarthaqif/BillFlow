@@ -411,7 +411,7 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
           {activeTab === 'expense' && (
             <form onSubmit={handleExpenseSubmit} className="space-y-4">
               {/* QUICK PAY TEMPLATES: 1-Click Fast Fill for recurring bills */}
-              {quickPayTemplates && quickPayTemplates.length > 0 && (
+              {Array.isArray(quickPayTemplates) && quickPayTemplates.length > 0 && (
                 <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/30 space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-bold text-amber-400 flex items-center gap-1.5">

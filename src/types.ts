@@ -375,6 +375,7 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
+  passphrase?: string;
   familyRole: FamilyRole;
   householdName: string;
   householdId?: string;

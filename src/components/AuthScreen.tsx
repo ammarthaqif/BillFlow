@@ -7,9 +7,15 @@ import {
   User, 
   Heart, 
   CheckCircle2,
-  Sparkles,
-  Zap,
-  Info
+  Sparkles, 
+  Zap, 
+  Info,
+  ArrowLeft,
+  RotateCcw,
+  AlertTriangle,
+  Layers,
+  Trash2,
+  Lock
 } from 'lucide-react';
 import { UserProfile, FamilyRole } from '../types';
 import { UserDatabaseService } from '../services/userDatabaseService';
@@ -18,18 +24,35 @@ interface AuthScreenProps {
   onAuthenticated: (user: UserProfile) => void;
 }
 
+type AuthViewMode = 'register' | 'signin' | 'forgot_passphrase' | 'reset_database';
+
 export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
-  const [isRegistering, setIsRegistering] = useState(true);
+  const [viewMode, setViewMode] = useState<AuthViewMode>('signin');
+  
+  // Registration fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [familyRole, setFamilyRole] = useState<FamilyRole>('husband');
   const [householdName, setHouseholdName] = useState('My Household');
   const [starterData, setStarterData] = useState<'standard' | 'wife_starter' | 'blank'>('standard');
+
+  // Password reset fields
+  const [resetEmail, setResetEmail] = useState('');
+  const [newPassphrase, setNewPassphrase] = useState('');
+  const [confirmNewPassphrase, setConfirmNewPassphrase] = useState('');
+  const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
+
+  // Database reset fields from auth screen
+  const [dbResetEmail, setDbResetEmail] = useState('');
+  const [dbResetPassphrase, setDbResetPassphrase] = useState('');
+  const [dbResetTemplate, setDbResetTemplate] = useState<'standard' | 'wife_starter' | 'blank' | 'factory'>('standard');
+  const [dbResetConfirmWord, setDbResetConfirmWord] = useState('');
+
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Sign in by email
+  // Sign in by email & passphrase
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
@@ -40,13 +63,12 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     setError(null);
 
     try {
-      const users = UserDatabaseService.getRegisteredUsers();
-      const existing = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
-      if (existing) {
-        UserDatabaseService.setActiveUser(existing.id);
-        onAuthenticated(existing);
+      const result = UserDatabaseService.verifyCredentials(email, passphrase);
+      if (result.valid && result.user) {
+        UserDatabaseService.setActiveUser(result.user.id);
+        onAuthenticated(result.user);
       } else {
-        setError(`No account found for ${email}. Please register your free account below.`);
+        setError(result.error || `No account found for ${email}. Please check your credentials or register below.`);
       }
     } catch (err: any) {
       setError(err.message || 'Sign in failed');
@@ -69,13 +91,108 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       const { user } = UserDatabaseService.registerUser({
         name: name.trim(),
         email: email.trim(),
+        passphrase: passphrase.trim() || undefined,
         familyRole,
         householdName: householdName.trim() || 'My Household',
         initialDataTemplate: starterData,
       });
+      UserDatabaseService.setActiveUser(user.id);
       onAuthenticated(user);
     } catch (err: any) {
       setError(err.message || 'Registration failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Reset forgotten password
+  const handleResetPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) {
+      setError('Please enter your registered email address.');
+      return;
+    }
+    if (!newPassphrase.trim() || newPassphrase.trim().length < 3) {
+      setError('New passphrase must be at least 3 characters long.');
+      return;
+    }
+    if (newPassphrase !== confirmNewPassphrase) {
+      setError('New passphrase and confirmation do not match.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const updatedUser = UserDatabaseService.resetUserPassphrase(resetEmail, newPassphrase);
+      setResetSuccessMessage(`Passphrase updated successfully for ${updatedUser.name}! Logging you in...`);
+      setTimeout(() => {
+        UserDatabaseService.setActiveUser(updatedUser.id);
+        onAuthenticated(updatedUser);
+      }, 900);
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset passphrase. Please ensure the email is registered.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Reset database from login screen
+  const handleResetDatabaseFromAuth = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (dbResetTemplate === 'factory') {
+      if (dbResetConfirmWord.trim().toUpperCase() !== 'RESET') {
+        setError('Please type RESET to confirm factory reset.');
+        return;
+      }
+      setIsLoading(true);
+      UserDatabaseService.factoryResetAllData();
+      setError(null);
+      setResetSuccessMessage('Factory reset complete. Returning to registration...');
+      setTimeout(() => {
+        window.location.reload();
+      }, 800);
+      return;
+    }
+
+    if (!dbResetEmail.trim()) {
+      setError('Please enter your registered email address.');
+      return;
+    }
+
+    if (dbResetConfirmWord.trim().toUpperCase() !== 'RESET') {
+      setError('Please type RESET in the confirmation box.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const users = UserDatabaseService.getRegisteredUsers();
+      const existing = users.find((u) => u.email.toLowerCase() === dbResetEmail.trim().toLowerCase());
+      if (!existing) {
+        throw new Error(`No account found for ${dbResetEmail}.`);
+      }
+
+      // If user has passphrase, verify
+      if (existing.passphrase && existing.passphrase !== dbResetPassphrase.trim()) {
+        throw new Error('Incorrect security passphrase for this account.');
+      }
+
+      const freshDb = UserDatabaseService.resetUserDatabase(
+        existing.id,
+        dbResetTemplate === 'wife_starter' ? 'wife_starter' : dbResetTemplate === 'blank' ? 'blank' : 'standard'
+      );
+
+      setResetSuccessMessage(`Database partition reset successfully for ${existing.name}! Loading fresh session...`);
+      setTimeout(() => {
+        UserDatabaseService.setActiveUser(existing.id);
+        onAuthenticated(existing);
+      }, 900);
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset database.');
     } finally {
       setIsLoading(false);
     }
@@ -142,41 +259,134 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
         {/* Main Auth Form Container */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-2xl space-y-5">
-          {/* Tabs */}
-          <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
-            <button
-              type="button"
-              onClick={() => { setIsRegistering(true); setError(null); }}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                isRegistering 
-                  ? 'bg-indigo-600 text-white shadow' 
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Register Free Account
-            </button>
-            <button
-              type="button"
-              onClick={() => { setIsRegistering(false); setError(null); }}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                !isRegistering 
-                  ? 'bg-indigo-600 text-white shadow' 
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Sign In to Existing DB
-            </button>
-          </div>
+          {/* Tabs - only visible in signin or register */}
+          {(viewMode === 'signin' || viewMode === 'register') && (
+            <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setViewMode('signin'); setError(null); }}
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  viewMode === 'signin' 
+                    ? 'bg-indigo-600 text-white shadow' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Sign In to Existing DB
+              </button>
+              <button
+                type="button"
+                onClick={() => { setViewMode('register'); setError(null); }}
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  viewMode === 'register' 
+                    ? 'bg-indigo-600 text-white shadow' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Register Free Account
+              </button>
+            </div>
+          )}
 
           {error && (
             <div className="p-3 bg-rose-950/40 border border-rose-800/60 rounded-xl text-rose-300 text-xs flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
-          {isRegistering ? (
-            /* Registration Form */
+          {resetSuccessMessage && (
+            <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{resetSuccessMessage}</span>
+            </div>
+          )}
+
+          {/* VIEW 1: SIGN IN */}
+          {viewMode === 'signin' && (
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Registered Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="e.g. yourname@domain.com"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Security Passphrase
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetEmail(email);
+                      setError(null);
+                      setResetSuccessMessage(null);
+                      setViewMode('forgot_passphrase');
+                    }}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition-colors cursor-pointer"
+                  >
+                    Forgot Passphrase?
+                  </button>
+                </div>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    placeholder="Enter passphrase"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 text-xs flex items-center gap-2">
+                <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span>
+                  Signing in loads your isolated personal database partition from local storage.
+                </span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer disabled:opacity-50"
+              >
+                <Database className="w-4 h-4" />
+                <span>{isLoading ? 'Signing In...' : 'Sign In to My Dedicated Database'}</span>
+              </button>
+
+              <div className="pt-2 border-t border-slate-800/80 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDbResetEmail(email);
+                    setError(null);
+                    setResetSuccessMessage(null);
+                    setViewMode('reset_database');
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Need a fresh restart? Reset database partition</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* VIEW 2: REGISTER */}
+          {viewMode === 'register' && (
             <form onSubmit={handleRegister} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -187,7 +397,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                     <input
                       type="text"
-                      value={name ?? ''}
+                      value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="e.g. Ammar Thaqif"
                       required
@@ -203,7 +413,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   <div className="relative">
                     <Heart className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                     <select
-                      value={familyRole ?? 'husband'}
+                      value={familyRole}
                       onChange={(e) => setFamilyRole(e.target.value as FamilyRole)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                     >
@@ -226,7 +436,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                     <input
                       type="email"
-                      value={email ?? ''}
+                      value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="e.g. yourname@domain.com"
                       required
@@ -241,7 +451,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   </label>
                   <input
                     type="text"
-                    value={householdName ?? ''}
+                    value={householdName}
                     onChange={(e) => setHouseholdName(e.target.value)}
                     placeholder="e.g. Thaqif Household"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
@@ -251,15 +461,15 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Security Passphrase
+                  Security Passphrase (For Account Access & Reset)
                 </label>
                 <div className="relative">
                   <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                   <input
                     type="password"
-                    value={passphrase ?? ''}
+                    value={passphrase}
                     onChange={(e) => setPassphrase(e.target.value)}
-                    placeholder="Create a personal access passphrase"
+                    placeholder="Create a secure personal passphrase"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   />
                 </div>
@@ -267,7 +477,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Starter Data Preset (Within Free 3-Account Limit)
+                  Starter Data Preset
                 </label>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                   <button
@@ -324,23 +534,47 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer disabled:opacity-50"
               >
                 <Database className="w-4 h-4" />
-                <span>Create Free Account & Open Dedicated DB</span>
+                <span>{isLoading ? 'Creating Account...' : 'Create Free Account & Open Dedicated DB'}</span>
               </button>
             </form>
-          ) : (
-            /* Sign In Form */
-            <form onSubmit={handleSignIn} className="space-y-4">
+          )}
+
+          {/* VIEW 3: FORGOT / RESET PASSPHRASE */}
+          {viewMode === 'forgot_passphrase' && (
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setViewMode('signin');
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-indigo-400" />
+                    <span>Reset Security Passphrase</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Verify your registered email and choose a new passphrase for your account.
+                  </p>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Registered Email Address
+                  Your Registered Email Address
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                   <input
                     type="email"
-                    value={email ?? ''}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. yourname@domain.com"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="Enter registered email"
                     required
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   />
@@ -349,25 +583,36 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Security Passphrase
+                  New Security Passphrase
                 </label>
                 <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                   <input
                     type="password"
-                    value={passphrase ?? ''}
-                    onChange={(e) => setPassphrase(e.target.value)}
-                    placeholder="Enter passphrase"
+                    value={newPassphrase}
+                    onChange={(e) => setNewPassphrase(e.target.value)}
+                    placeholder="Enter new passphrase (min. 3 characters)"
+                    required
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   />
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 text-xs flex items-center gap-2">
-                <Info className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span>
-                  Signing in loads your personal database partition from local storage or cloud server.
-                </span>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Confirm New Passphrase
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    value={confirmNewPassphrase}
+                    onChange={(e) => setConfirmNewPassphrase(e.target.value)}
+                    placeholder="Re-enter new passphrase"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
               </div>
 
               <button
@@ -375,8 +620,151 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 disabled={isLoading}
                 className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer disabled:opacity-50"
               >
-                <Database className="w-4 h-4" />
-                <span>Sign In to My Dedicated Database</span>
+                <KeyRound className="w-4 h-4" />
+                <span>{isLoading ? 'Updating Passphrase...' : 'Update Passphrase & Sign In'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setViewMode('signin');
+                }}
+                className="w-full py-2 text-xs font-medium text-slate-400 hover:text-white transition-colors cursor-pointer text-center"
+              >
+                Back to Sign In
+              </button>
+            </form>
+          )}
+
+          {/* VIEW 4: RESET DATABASE FOR FRESH RESTART */}
+          {viewMode === 'reset_database' && (
+            <form onSubmit={handleResetDatabaseFromAuth} className="space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setViewMode('signin');
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4 text-rose-400" />
+                    <span>Reset Database for Fresh Restart</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Wipe current financial records and re-initialize with fresh defaults.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Your Registered Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="email"
+                    value={dbResetEmail}
+                    onChange={(e) => setDbResetEmail(e.target.value)}
+                    placeholder="Enter registered email"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Security Passphrase (If set)
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                  <input
+                    type="password"
+                    value={dbResetPassphrase}
+                    onChange={(e) => setDbResetPassphrase(e.target.value)}
+                    placeholder="Enter passphrase to authorize reset"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Select Restart Preset
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setDbResetTemplate('standard')}
+                    className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                      dbResetTemplate === 'standard'
+                        ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
+                        : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Starter Cards & Bills</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">3 fresh accounts & templates</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDbResetTemplate('blank')}
+                    className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                      dbResetTemplate === 'blank'
+                        ? 'border-amber-500 bg-amber-950/40 text-amber-300'
+                        : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Blank Canvas</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Zero accounts / clean start</div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Type <span className="font-mono text-rose-400 bg-rose-950/60 px-1 py-0.5 rounded border border-rose-900">RESET</span> to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={dbResetConfirmWord}
+                  onChange={(e) => setDbResetConfirmWord(e.target.value)}
+                  placeholder="RESET"
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors font-mono uppercase tracking-wider"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading || dbResetConfirmWord.trim().toUpperCase() !== 'RESET'}
+                className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:hover:bg-rose-600 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 cursor-pointer"
+              >
+                <RotateCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                <span>{isLoading ? 'Resetting Database...' : 'Confirm & Open Fresh Database'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setViewMode('signin');
+                }}
+                className="w-full py-2 text-xs font-medium text-slate-400 hover:text-white transition-colors cursor-pointer text-center"
+              >
+                Back to Sign In
               </button>
             </form>
           )}
@@ -396,4 +784,3 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     </div>
   );
 }
-
