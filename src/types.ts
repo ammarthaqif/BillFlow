@@ -167,11 +167,13 @@ export interface BillAccount {
   type: AccountType;
   color: string;
   totalBalance: number;
+  currentBalance?: number; // Liquid balance alias for bank accounts
   statementBalance: number;
   creditLimit: number;
   apr: number;
   lateFee: number;
   cycleDay: number; // Statement closing date (1-31)
+  dueDay?: number; // Day of month when settlement is due (1-31)
   gracePeriodDays: number; // Interest-free window (e.g. 21, 25, 30 days)
   dueDate: string; // YYYY-MM-DD
   minPayment: number;
@@ -184,6 +186,10 @@ export interface BillAccount {
   ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
   householdId?: string;
   householdName?: string;
+  isSharedLimit?: boolean; // True if sharing credit limit with other cards (e.g. Maybank 2 Cards Amex + Visa)
+  sharedLimitGroupId?: string; // Group ID uniting cards sharing credit limit
+  sharedLimitGroupName?: string; // e.g. "Maybank 2 Cards Shared Limit"
+  sharedCreditLimit?: number; // Total pooled credit limit for the group (e.g. RM 12,000)
 }
 
 export interface InstallmentPlan {
@@ -516,6 +522,40 @@ export interface FamilySyncPackage {
     totalAccounts: number;
     totalInstallments: number;
     totalExpenses?: number;
+    totalDebt: number;
+    totalMonthlyInstallments: number;
+  };
+}
+
+export interface DatabaseBackupPackage {
+  format: 'billflow-database-backup';
+  version: number;
+  exportedAt: string;
+  checksum: string;
+  exportedBy: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    familyRole: FamilyRole;
+    householdName: string;
+    householdId?: string;
+  };
+  data: {
+    accounts: BillAccount[];
+    installments: InstallmentPlan[];
+    expenses: ExpenseItem[];
+    standingInstructions?: StandingInstruction[];
+    quickPayTemplates?: QuickPayTemplate[];
+    settings?: UserSettings;
+    paidScheduleIds?: string[];
+    scheduledScheduleIds?: string[];
+  };
+  summary: {
+    totalAccounts: number;
+    totalInstallments: number;
+    totalExpenses: number;
+    totalStandingInstructions?: number;
+    totalQuickPayTemplates?: number;
     totalDebt: number;
     totalMonthlyInstallments: number;
   };

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Receipt, 
   Plus, 
@@ -29,7 +29,9 @@ import {
   QrCode,
   X,
   Repeat,
-  CalendarClock
+  CalendarClock,
+  FileSpreadsheet,
+  Download
 } from 'lucide-react';
 import { 
   ExpenseItem, 
@@ -42,6 +44,7 @@ import {
   RepaymentStructure
 } from '../types';
 import { CurrencyCode, formatCurrency, getCurrencyConfig } from '../utils/currency';
+import { downloadTransactionsCSV } from '../utils/csvExport';
 import { 
   getAccountTypeLabel, 
   renderAccountIcon, 
@@ -119,9 +122,38 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
   const [targetAccountIdForNew, setTargetAccountIdForNew] = useState<string | undefined>(undefined);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Auto-clear delete confirmation after 4 seconds
+  useEffect(() => {
+    if (confirmDeleteId) {
+      const timer = setTimeout(() => setConfirmDeleteId(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmDeleteId]);
 
   const [settlingExpense, setSettlingExpense] = useState<ExpenseItem | null>(null);
   const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
+  const [csvExportNotice, setCsvExportNotice] = useState<string | null>(null);
+
+  const handleExportCSV = () => {
+    try {
+      const res = downloadTransactionsCSV(
+        filteredExpenses,
+        currency,
+        accounts,
+        'user',
+        {
+          statusFilter: selectedStatusFilter !== 'all' ? (selectedStatusFilter as any) : undefined,
+          categoryFilter: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : undefined,
+        }
+      );
+      setCsvExportNotice(`Exported ${res.totalExported} transaction(s) to ${res.filename}`);
+      setTimeout(() => setCsvExportNotice(null), 4000);
+    } catch (err: any) {
+      setCsvExportNotice('Export failed: ' + (err.message || 'Error'));
+    }
+  };
 
   // Collect all unique tags across expenses
   const allAvailableTags = useMemo(() => {
@@ -442,6 +474,17 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
               </button>
             )}
 
+            {/* Export CSV Button */}
+            <button
+              id="btn-export-expenses-csv"
+              onClick={handleExportCSV}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/80 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 font-bold text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              title="Export current filtered expenses as CSV file for Excel or Google Sheets"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              <span>Export CSV</span>
+            </button>
+
             <button
               onClick={handleOpenAddModal}
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs transition-all shadow-md shadow-indigo-600/20 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
@@ -451,6 +494,13 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
             </button>
           </div>
         </div>
+
+        {csvExportNotice && (
+          <div className="bg-emerald-950/60 border border-emerald-500/30 rounded-xl px-3.5 py-2 flex items-center gap-2 text-emerald-300 text-xs animate-in fade-in duration-200">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{csvExportNotice}</span>
+          </div>
+        )}
 
         {/* Filter Chips Bar */}
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/80 text-xs">
@@ -980,18 +1030,30 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
                         <Edit3 className="w-4 h-4" />
                       </button>
 
-                      {/* Delete Button */}
-                      <button
-                        onClick={() => {
-                          if (confirm(`Are you sure you want to delete "${expense.title}"?`)) {
+                      {/* Delete Button with Safe Inline Confirmation */}
+                      {confirmDeleteId === expense.id ? (
+                        <button
+                          type="button"
+                          onClick={() => {
                             onDeleteExpense(expense.id);
-                          }
-                        }}
-                        className="p-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 hover:border-rose-500/40 border border-slate-700/80 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
-                        title="Delete expense"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                            setConfirmDeleteId(null);
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs animate-pulse transition-colors cursor-pointer flex items-center gap-1 shadow-lg shadow-rose-900/40"
+                          title="Confirm permanent deletion"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete?</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(expense.id)}
+                          className="p-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 hover:border-rose-500/40 border border-slate-700/80 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                          title="Delete expense"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1010,6 +1072,7 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
         expenses={expenses}
         currency={currency}
         initialAccountId={targetAccountIdForNew}
+        onDeleteExpense={onDeleteExpense}
         onSaveExpense={(data, immediateSettle, installmentSplit) => {
           if (editingExpense && editingExpense.id) {
             onUpdateExpense({

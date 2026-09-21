@@ -26,11 +26,12 @@ export function calculatePaymentSchedule(
   availableCash: number,
   paycheckDates: number[] = [1, 15]
 ): PaymentScheduleItem[] {
-  // First, calculate minimums required across all accounts to guarantee zero late fees
-  const totalMinRequired = accounts.reduce((sum, a) => sum + a.minPayment, 0);
+  // Only bill/debt accounts need to be paid (exclude liquid bank_account)
+  const billAccounts = (accounts || []).filter((a) => a.type !== 'bank_account');
+  const totalMinRequired = billAccounts.reduce((sum, a) => sum + a.minPayment, 0);
 
-  // Clone accounts to avoid mutation
-  const sortedAccounts = [...accounts];
+  // Clone bill accounts to avoid mutation
+  const sortedAccounts = [...billAccounts];
 
   // Sort based on strategy
   if (strategy === 'grace_float') {
@@ -163,8 +164,13 @@ export function generateAlerts(
   const alerts: CustomAlert[] = [];
 
   accounts.forEach((acc) => {
+    // Bank accounts are liquid cash deposit accounts, not debt or credit lines
+    if (acc.type === 'bank_account') return;
+
     const days = getDaysDifference(acc.dueDate);
-    const utilization = Math.round((acc.totalBalance / acc.creditLimit) * 100);
+    const isRevolving = acc.type === 'credit_card' || acc.type === 'ewallet_pay_later';
+    const limit = acc.creditLimit || 0;
+    const utilization = isRevolving && limit > 0 ? Math.round((acc.totalBalance / limit) * 100) : 0;
 
     if (days <= 3 && days >= 0) {
       alerts.push({
@@ -196,14 +202,14 @@ export function generateAlerts(
       });
     }
 
-    if (utilization >= 70) {
+    if (isRevolving && utilization >= 70) {
       alerts.push({
         id: `alert-util-${acc.id}`,
         accountId: acc.id,
         accountName: acc.name,
         type: 'high_utilization',
         title: `High Utilization Alert (${utilization}%)`,
-        message: `${acc.name} balance (${formatCurrency(acc.totalBalance, currency)}) is at ${utilization}% of limit (${formatCurrency(acc.creditLimit, currency)}). Paying down lowers credit score impact.`,
+        message: `${acc.name} balance (${formatCurrency(acc.totalBalance, currency)}) is at ${utilization}% of limit (${formatCurrency(limit, currency)}). Paying down lowers credit score impact.`,
         dueDate: acc.dueDate,
         daysRemaining: days,
         severity: 'warning',
@@ -272,9 +278,10 @@ export function projectMonthlyCashFlow(
 
     // In month 0, revolving bills due is the full statement balance
     // In future months, estimated baseline revolving spend
+    const debtAccounts = accounts.filter((a) => a.type !== 'bank_account');
     const revolvingDue = m === 0 
-      ? accounts.reduce((sum, a) => sum + Math.max(0, a.statementBalance - (categoryMap['Total'] || 0)), 0)
-      : Math.round(accounts.reduce((sum, a) => sum + a.statementBalance, 0) * (0.85 ** m));
+      ? debtAccounts.reduce((sum, a) => sum + Math.max(0, a.statementBalance - (categoryMap['Total'] || 0)), 0)
+      : Math.round(debtAccounts.reduce((sum, a) => sum + a.statementBalance, 0) * (0.85 ** m));
 
     const totalCommitted = totalInstallmentMonth + revolvingDue;
     const discretionaryRemaining = Math.max(0, monthlyIncome - totalCommitted);

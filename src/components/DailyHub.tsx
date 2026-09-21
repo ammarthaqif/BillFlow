@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Zap, 
   Sparkles, 
@@ -25,7 +25,8 @@ import {
   ArrowUpRight,
   Receipt,
   Layers,
-  Banknote
+  Banknote,
+  Trash2
 } from 'lucide-react';
 import { 
   BillAccount, 
@@ -75,7 +76,10 @@ interface DailyHubProps {
       referenceCode: string;
     }
   ) => void;
-  onSwitchTab?: (tab: 'today' | 'strategy' | 'expenses' | 'accounts') => void;
+  onBatchSettleUnsettled?: (expenseIds: string[]) => void;
+  onClearUnsettledSwipes?: () => void;
+  onSwitchTab?: (tab: 'today' | 'overview' | 'strategy' | 'expenses' | 'accounts') => void;
+  onDeleteExpense?: (expenseId: string) => void;
 }
 
 export const DailyHub: React.FC<DailyHubProps> = ({
@@ -97,9 +101,22 @@ export const DailyHub: React.FC<DailyHubProps> = ({
   onOpenUniversalQuickAdd,
   onToggleScheduleStatus,
   onImmediateSettleExpense,
+  onBatchSettleUnsettled,
+  onClearUnsettledSwipes,
   onSwitchTab,
+  onDeleteExpense,
 }) => {
   const currencyConfig = getCurrencyConfig(currency);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Auto-reset confirmDeleteId after 4s
+  useEffect(() => {
+    if (confirmDeleteId) {
+      const timer = setTimeout(() => setConfirmDeleteId(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmDeleteId]);
   const today = new Date();
   const currentDay = today.getDate();
 
@@ -114,6 +131,7 @@ export const DailyHub: React.FC<DailyHubProps> = ({
   });
   const [instantSettle, setInstantSettle] = useState(false);
   const [quickLogSuccess, setQuickLogSuccess] = useState<string | null>(null);
+  const [swipesView, setSwipesView] = useState<'pending' | 'today'>('pending');
 
   // Daily Streak Counter (Calculated & Persisted)
   const streakDays = useMemo(() => {
@@ -235,7 +253,7 @@ export const DailyHub: React.FC<DailyHubProps> = ({
     setQuickAmount(presetAmount.toString());
   };
 
-  const primaryBank = accounts.find((a) => a.type === 'bank_account');
+  const primaryBank = (settings?.primaryBankAccountId ? accounts.find((a) => a.id === settings.primaryBankAccountId) : null) || accounts.find((a) => a.type === 'bank_account');
 
   return (
     <div className="space-y-6">
@@ -652,82 +670,185 @@ export const DailyHub: React.FC<DailyHubProps> = ({
 
         {/* Column 2: Recent Swipes & Instant Settlement */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Receipt className="w-4 h-4 text-indigo-400" />
-              <h3 className="font-bold text-white text-sm">
-                Recent Swipes Awaiting Settlement
-              </h3>
+              <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSwipesView('pending')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
+                    swipesView === 'pending'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Pending Swipes ({pendingSwipes.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSwipesView('today')}
+                  className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${
+                    swipesView === 'today'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Today's Purchases ({todayExpenses.length})
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onSwitchTab?.('expenses')}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 cursor-pointer"
-            >
-              <span>View All ({expenses.length})</span>
-              <ChevronRight className="w-3 h-3" />
-            </button>
+            
+            <div className="flex items-center gap-1.5">
+              {swipesView === 'pending' && pendingSwipes.length > 0 && onBatchSettleUnsettled && (
+                <button
+                  type="button"
+                  onClick={() => onBatchSettleUnsettled(pendingSwipes.map((p) => p.id))}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Settle all pending swipes via FPX"
+                >
+                  <Zap className="w-3 h-3 text-emerald-400 fill-current" />
+                  <span>Settle All ({pendingSwipes.length})</span>
+                </button>
+              )}
+
+              {swipesView === 'pending' && pendingSwipes.length > 0 && onClearUnsettledSwipes && (
+                <button
+                  type="button"
+                  onClick={onClearUnsettledSwipes}
+                  className="px-2 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-semibold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Dismiss and purge all unsettled swipes"
+                >
+                  <Trash2 className="w-3 h-3 text-rose-400" />
+                  <span className="hidden sm:inline">Clear Swipes</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onSwitchTab?.('expenses')}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 cursor-pointer pl-1"
+              >
+                <span>All ({expenses.length})</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
           </div>
 
-          {pendingSwipes.length > 0 ? (
-            <div className="space-y-2.5">
-              {pendingSwipes.map((expense) => {
-                const chargedAcc = accounts.find((a) => a.id === expense.accountId);
-                return (
-                  <div
-                    key={expense.id}
-                    className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between gap-3 text-xs hover:border-slate-700 transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 shrink-0">
-                        {getExpenseCategoryIcon(expense.category, 'w-4 h-4')}
-                      </div>
-                      <div>
-                        <div className="font-bold text-white">{expense.title}</div>
-                        <div className="text-[11px] text-slate-400">
-                          {expense.accountName} • {expense.date}
-                        </div>
-                      </div>
-                    </div>
+          {(() => {
+            const activeDisplayList = swipesView === 'pending' ? pendingSwipes : todayExpenses;
 
-                    <div className="flex items-center gap-2.5">
-                      <div className="text-right">
-                        <div className="font-mono font-bold text-white">
-                          {formatCurrency(expense.amount, currency)}
-                        </div>
-                        <span className="text-[10px] text-amber-400 font-medium">Unsettled</span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onImmediateSettleExpense?.(expense.id, {
-                            method: 'instant_fpx',
-                            amountSettled: expense.amount,
-                            sourceAccountId: primaryBank?.id,
-                            referenceCode: `FPX-${Date.now().toString(36).toUpperCase()}`,
-                          });
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-semibold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                        title="Settle instantly from primary bank account"
-                      >
-                        <Zap className="w-3 h-3 text-emerald-400" />
-                        <span>Settle</span>
-                      </button>
-                    </div>
+            if (activeDisplayList.length === 0) {
+              return (
+                <div className="p-6 rounded-xl bg-slate-950/40 border border-slate-800/80 text-center space-y-2">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
+                  <div className="font-bold text-slate-200 text-sm">
+                    {swipesView === 'pending' ? 'All Swipes Settled!' : 'No Expenses Logged Today'}
                   </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="p-6 rounded-xl bg-slate-950/40 border border-slate-800/80 text-center space-y-2">
-              <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-              <div className="font-bold text-slate-200 text-sm">All Swipes Settled!</div>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                No pending unsettled card charges found. Your account is fully reconciled.
-              </p>
-            </div>
-          )}
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    {swipesView === 'pending'
+                      ? 'No pending unsettled card charges found. Your account is fully reconciled.'
+                      : 'Use the quick form on the left to record daily coffee, dining, or fuel expenses.'}
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-2.5">
+                {activeDisplayList.map((expense) => {
+                  const isSettled = expense.status === 'settled';
+                  return (
+                    <div
+                      key={expense.id}
+                      className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between gap-3 text-xs hover:border-slate-700 transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 shrink-0">
+                          {getExpenseCategoryIcon(expense.category, 'w-4 h-4')}
+                        </div>
+                        <div className="truncate">
+                          <div className="font-bold text-white truncate">{expense.title}</div>
+                          <div className="text-[11px] text-slate-400 flex items-center gap-1.5 flex-wrap">
+                            <span>{expense.accountName}</span>
+                            <span>•</span>
+                            <span>{expense.date}</span>
+                            {expense.merchant && (
+                              <>
+                                <span>•</span>
+                                <span className="text-slate-300">{expense.merchant}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="text-right">
+                          <div className="font-mono font-bold text-white">
+                            {formatCurrency(expense.amount, currency)}
+                          </div>
+                          <span
+                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                              isSettled
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            }`}
+                          >
+                            {isSettled ? 'Settled' : 'Unsettled'}
+                          </span>
+                        </div>
+
+                        {!isSettled && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onImmediateSettleExpense?.(expense.id, {
+                                method: 'instant_fpx',
+                                amountSettled: expense.amount,
+                                sourceAccountId: primaryBank?.id,
+                                referenceCode: `FPX-${Date.now().toString(36).toUpperCase()}`,
+                              });
+                            }}
+                            className="px-2 py-1 rounded-lg bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-semibold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Settle instantly from primary bank account"
+                          >
+                            <Zap className="w-3 h-3 text-emerald-400" />
+                            <span className="hidden sm:inline">Settle</span>
+                          </button>
+                        )}
+
+                        {onDeleteExpense && (
+                          confirmDeleteId === expense.id ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onDeleteExpense(expense.id);
+                                setConfirmDeleteId(null);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] animate-pulse transition-colors cursor-pointer shadow-md shadow-rose-900/50"
+                              title="Confirm delete expense"
+                            >
+                              Delete?
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(expense.id)}
+                              className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-500/20 hover:border-rose-500/40 border border-slate-800 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                              title="Delete this daily expense"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

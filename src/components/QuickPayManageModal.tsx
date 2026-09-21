@@ -39,8 +39,6 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
   onDeleteTemplate,
   onSelectForPay,
 }) => {
-  if (!isOpen) return null;
-
   const currencyConfig = getCurrencyConfig(currency);
   const bankAccounts = accounts.filter((a) => a.type === 'bank_account');
   const allFundingAccounts = accounts.filter(
@@ -89,11 +87,11 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
 
   const handleStartEdit = (t: QuickPayTemplate) => {
     setEditingTemplateId(t.id);
-    setTitle(t.title);
-    setBeneficiary(t.beneficiary);
-    setBeneficiaryAccountOrRef(t.beneficiaryAccountOrRef);
-    setDefaultAmount(t.defaultAmount.toString());
-    setCategory(t.category);
+    setTitle(t.title || '');
+    setBeneficiary(t.beneficiary || '');
+    setBeneficiaryAccountOrRef(t.beneficiaryAccountOrRef || '');
+    setDefaultAmount((t.defaultAmount ?? 0).toString());
+    setCategory(t.category || 'Utilities (Electricity, Water, IWK)');
     setSettlementMethod(t.settlementMethod || 'jompay');
     setPaymentMode(t.paymentMode || 'cash');
     setSourceAccountId(t.sourceAccountId || bankAccounts[0]?.id || accounts[0]?.id || '');
@@ -117,13 +115,13 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
       beneficiaryAccountOrRef: beneficiaryAccountOrRef.trim() || 'Direct Online Settlement',
       defaultAmount: parseFloat(defaultAmount) || 0,
       category,
-      settlementMethod,
-      paymentMode,
+      settlementMethod: settlementMethod || 'jompay',
+      paymentMode: paymentMode || 'cash',
       sourceAccountId: sourceAccountId || undefined,
       sourceAccountName: selectedAcc ? selectedAcc.name : undefined,
-      frequencyHint,
+      frequencyHint: frequencyHint || 'monthly',
       notes: notes.trim() || undefined,
-      usageCount: existing ? existing.usageCount : 0,
+      usageCount: existing ? (existing.usageCount || 0) : 0,
       lastUsedAt: existing?.lastUsedAt,
       createdAt: existing?.createdAt || new Date().toISOString(),
       ownerName: existing?.ownerName || 'Active User',
@@ -149,6 +147,8 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
     const matchesCategory = selectedCategoryFilter === 'all' || t.category === selectedCategoryFilter;
     return matchesSearch && matchesCategory;
   });
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto animate-fadeIn">
@@ -317,6 +317,7 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
                     onChange={(e) => setSourceAccountId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                   >
+                    <option value="">No linked funding account (Manual / Direct settlement)</option>
                     {allFundingAccounts.map((acc) => (
                       <option key={acc.id} value={acc.id}>
                         {acc.name} ({acc.institution}) — {acc.type === 'bank_account' ? `Balance: ${formatCurrency(acc.totalBalance, currency)}` : `Statement: ${formatCurrency(acc.statementBalance, currency)}`}
@@ -442,7 +443,7 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
                         <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between text-xs">
                           <span className="text-[11px] text-slate-400">
                             Used {template.usageCount || 0}x
-                            {template.lastUsedAt && (
+                            {template.lastUsedAt && !isNaN(new Date(template.lastUsedAt).getTime()) && (
                               <span className="ml-1.5 text-slate-400">
                                 • Last paid {new Date(template.lastUsedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                               </span>
@@ -455,8 +456,9 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onDeleteTemplate(template.id);
+                                    const idToDelete = template.id;
                                     setDeleteConfirmId(null);
+                                    onDeleteTemplate(idToDelete);
                                   }}
                                   className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-[10px] font-bold text-white transition-colors cursor-pointer"
                                 >

@@ -24,10 +24,13 @@ import {
   CheckCircle2,
   UserCheck,
   UserX,
-  HelpCircle
+  HelpCircle,
+  FileSpreadsheet,
+  HardDrive
 } from 'lucide-react';
 import { UserProfile, UserDedicatedDatabase, FamilySyncPackage, FamilyRole, PartnerConnectionPermissions } from '../types';
 import { UserDatabaseService } from '../services/userDatabaseService';
+import { downloadTransactionsCSV } from '../utils/csvExport';
 
 interface FamilySyncModalProps {
   isOpen: boolean;
@@ -58,10 +61,13 @@ export function FamilySyncModal({
   const [includeInstallments, setIncludeInstallments] = useState(true);
   const [includeSettings, setIncludeSettings] = useState(true);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [csvExportNotice, setCsvExportNotice] = useState<string | null>(null);
+  const [backupDownloadNotice, setBackupDownloadNotice] = useState<string | null>(null);
 
   // Import State
   const [importInputText, setImportInputText] = useState('');
   const [parsedPackage, setParsedPackage] = useState<FamilySyncPackage | null>(null);
+  const [isFullBackupPackage, setIsFullBackupPackage] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [tagWithOwner, setTagWithOwner] = useState(true);
   const [customTag, setCustomTag] = useState('');
@@ -169,14 +175,25 @@ export function FamilySyncModal({
     setCrossHouseholdOverride(false);
     try {
       const parsed = JSON.parse(content.trim());
-      if (parsed.format !== 'billflow-family-sync') {
-        throw new Error('This file or code does not match the BillFlow Family Sync format.');
+      const format = parsed.format || (parsed.data?.accounts || parsed.accounts ? 'billflow-database-backup' : undefined);
+      
+      if (format !== 'billflow-family-sync' && format !== 'billflow-database-backup' && !parsed.accounts) {
+        throw new Error('This file or code does not match BillFlow Family Sync or Database Backup formats.');
       }
+      
+      const isBackup = format === 'billflow-database-backup' || Boolean(parsed.accounts);
+      setIsFullBackupPackage(isBackup);
       setParsedPackage(parsed);
-      setCustomTag(`${parsed.exportedBy?.userName || 'Partner'} (${parsed.exportedBy?.familyRole || 'Spouse'})`);
+
+      if (isBackup) {
+        setCustomTag(`${parsed.exportedBy?.userName || 'Backup'} (${parsed.exportedBy?.familyRole || 'Personal'})`);
+      } else {
+        setCustomTag(`${parsed.exportedBy?.userName || 'Partner'} (${parsed.exportedBy?.familyRole || 'Spouse'})`);
+      }
     } catch (err: any) {
-      setImportError(err.message || 'Invalid JSON sync package. Please verify the code or file.');
+      setImportError(err.message || 'Invalid JSON package. Please verify the code or file.');
       setParsedPackage(null);
+      setIsFullBackupPackage(false);
     }
   };
 
@@ -201,6 +218,35 @@ export function FamilySyncModal({
   const handleExecuteImport = () => {
     if (!parsedPackage) return;
     setImportError(null);
+
+    // If it's a full database backup package, use restoreDatabaseBackup
+    if (isFullBackupPackage || (parsedPackage as any).format === 'billflow-database-backup') {
+      try {
+        const result = UserDatabaseService.restoreDatabaseBackup(
+          currentDb,
+          parsedPackage,
+          {
+            mode: importMode,
+            targetUser: activeUser,
+          }
+        );
+
+        onDatabaseUpdated(result.updatedDb);
+
+        setImportSuccessMessage(
+          result.mode === 'replace'
+            ? `Full database restore complete! Loaded ${result.accountsRestored} account(s), ${result.expensesRestored} transaction(s), and ${result.installmentsRestored} installment(s).`
+            : `Smart merge complete! Appended ${result.accountsRestored} account(s) and ${result.expensesRestored} transaction(s) into your active database.`
+        );
+        setParsedPackage(null);
+        setImportInputText('');
+        setIsFullBackupPackage(false);
+        return;
+      } catch (err: any) {
+        setImportError(err.message || 'Database restore failed.');
+        return;
+      }
+    }
 
     if (isCrossHousehold && !crossHouseholdOverride) {
       setImportError(
@@ -1190,7 +1236,7 @@ export function FamilySyncModal({
                   className="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Download .json File</span>
+                  <span>Download Family Sync .json</span>
                 </button>
                 <button
                   type="button"
@@ -1200,6 +1246,86 @@ export function FamilySyncModal({
                   <Copy className="w-4 h-4" />
                   <span>{copiedCode ? 'Copied to Clipboard!' : 'Copy Code'}</span>
                 </button>
+              </div>
+
+              {/* DEDICATED DATA EXPORT & BACKUP FOR PERSONAL RECORD-KEEPING */}
+              <div className="pt-3 border-t border-slate-800 space-y-3">
+                <span className="text-slate-400 text-[10px] font-semibold uppercase tracking-wider block">
+                  Personal Record-Keeping & Full Backups
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Export Transactions as CSV */}
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2.5">
+                    <div>
+                      <div className="flex items-center gap-2 font-bold text-white text-xs">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                        <span>Transaction History (CSV)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Download all {(currentDb.expenses || []).length} recorded expense swipes formatted for Excel, Google Sheets & Apple Numbers.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = downloadTransactionsCSV(
+                          currentDb.expenses || [],
+                          currentDb.settings.currency || 'MYR',
+                          currentDb.accounts || [],
+                          activeUser.name
+                        );
+                        setCsvExportNotice(`Exported ${res.totalExported} records to ${res.filename}`);
+                        setTimeout(() => setCsvExportNotice(null), 4000);
+                      }}
+                      className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-600/20"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Transactions CSV</span>
+                    </button>
+                  </div>
+
+                  {/* Complete Database Backup */}
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2.5">
+                    <div>
+                      <div className="flex items-center gap-2 font-bold text-white text-xs">
+                        <HardDrive className="w-4 h-4 text-indigo-400" />
+                        <span>Complete Database Backup</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Save a full JSON backup of accounts, installments, expenses, and configuration for safekeeping.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = UserDatabaseService.downloadDatabaseBackup(activeUser, currentDb);
+                        setBackupDownloadNotice(`Backup saved: ${res.filename}`);
+                        setTimeout(() => setBackupDownloadNotice(null), 4000);
+                      }}
+                      className="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Full Backup (.json)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {csvExportNotice && (
+                  <div className="bg-emerald-950/50 border border-emerald-500/30 rounded-lg p-2.5 flex items-center gap-2 text-emerald-300 text-xs">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{csvExportNotice}</span>
+                  </div>
+                )}
+
+                {backupDownloadNotice && (
+                  <div className="bg-indigo-950/50 border border-indigo-500/30 rounded-lg p-2.5 flex items-center gap-2 text-indigo-300 text-xs">
+                    <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span>{backupDownloadNotice}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

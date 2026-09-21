@@ -17,7 +17,8 @@ import {
   CheckCircle2,
   Banknote,
   Gift,
-  AlertTriangle
+  AlertTriangle,
+  Layers
 } from 'lucide-react';
 import { 
   BillAccount, 
@@ -81,8 +82,6 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
   onAddInstallment,
   onOpenReceiptCapture,
 }) => {
-  if (!isOpen) return null;
-
   const currencyConfig = getCurrencyConfig(currency);
   const [activeTab, setActiveTab] = useState<'expense' | 'bank_balance' | 'account' | 'recurring'>(initialTab);
 
@@ -129,9 +128,22 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
   const [accStatementBalance, setAccStatementBalance] = useState('');
   const [accCreditLimit, setAccCreditLimit] = useState('10000');
   const [accApr, setAccApr] = useState('15');
-  const [accCycleDay, setAccCycleDay] = useState('15');
+  const [accCycleDay, setAccCycleDay] = useState('18');
+  const [accDueDay, setAccDueDay] = useState('8');
   const [accGraceDays, setAccGraceDays] = useState('20');
+  const [accDueDate, setAccDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 20);
+    return d.toISOString().split('T')[0];
+  });
   const [accColor, setAccColor] = useState('#4f46e5');
+
+  // Shared Credit Limit state (e.g. Maybank 2 Cards Amex + Visa)
+  const [accIsSharedLimit, setAccIsSharedLimit] = useState(false);
+  const [accSharedLimitGroupId, setAccSharedLimitGroupId] = useState('');
+  const [accSharedLimitGroupName, setAccSharedLimitGroupName] = useState('');
+  const [accSharedCreditLimit, setAccSharedCreditLimit] = useState('');
+  const [accSelectedPairedCardId, setAccSelectedPairedCardId] = useState('');
 
   // TAB 4: RECURRING / INSTALLMENT STATE
   const [recurringType, setRecurringType] = useState<'standing_instruction' | 'installment'>('standing_instruction');
@@ -249,11 +261,12 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
     const stmtBal = parseFloat(accStatementBalance) || 0;
     const limit = parseFloat(accCreditLimit) || (accType === 'bank_account' ? 0 : 5000);
     const apr = parseFloat(accApr) || 0;
-    const cycle = parseInt(accCycleDay, 10) || 15;
-    const grace = parseInt(accGraceDays, 10) || 20;
+    const cycle = Math.min(31, Math.max(1, parseInt(accCycleDay, 10) || 18));
+    const dueDayVal = Math.min(31, Math.max(1, parseInt(accDueDay, 10) || 8));
+    const computedGrace = dueDayVal > cycle ? dueDayVal - cycle : (30 - cycle) + dueDayVal;
+    const grace = parseInt(accGraceDays, 10) || computedGrace;
 
-    const nextDue = new Date();
-    nextDue.setDate(nextDue.getDate() + 25);
+    const effectiveSharedLimit = parseFloat(accSharedCreditLimit) || limit;
 
     onAddAccount({
       name: accName.trim() || `${accInstitution} ${getAccountTypeLabel(accType)}`,
@@ -261,14 +274,24 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
       type: accType,
       color: accColor,
       totalBalance: totBal,
+      currentBalance: accType === 'bank_account' ? totBal : undefined,
       statementBalance: stmtBal,
-      creditLimit: limit,
+      creditLimit: accIsSharedLimit ? effectiveSharedLimit : limit,
       apr,
       lateFee: accType === 'credit_card' ? 10 : 0,
       cycleDay: cycle,
+      dueDay: dueDayVal,
       gracePeriodDays: grace,
-      dueDate: nextDue.toISOString().split('T')[0],
+      dueDate: accDueDate || new Date(Date.now() + grace * 86400000).toISOString().split('T')[0],
       minPayment: Math.max(50, Math.round(stmtBal * 0.05)),
+      isSharedLimit: accIsSharedLimit,
+      sharedLimitGroupId: accIsSharedLimit 
+        ? (accSharedLimitGroupId || `shared-${Date.now().toString(36)}`)
+        : undefined,
+      sharedLimitGroupName: accIsSharedLimit
+        ? (accSharedLimitGroupName || `${accInstitution || 'Bank'} Combined Limit`)
+        : undefined,
+      sharedCreditLimit: accIsSharedLimit ? effectiveSharedLimit : undefined,
     });
     onClose();
   };
@@ -318,6 +341,8 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
     }
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
@@ -1034,48 +1059,146 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
               </div>
 
               {accType !== 'bank_account' && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div>
-                    <label className="block font-semibold text-slate-300 mb-1">Credit Limit</label>
-                    <input
-                      type="number"
-                      value={accCreditLimit}
-                      onChange={(e) => setAccCreditLimit(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
-                    />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1">Credit Limit</label>
+                      <input
+                        type="number"
+                        value={accCreditLimit}
+                        onChange={(e) => setAccCreditLimit(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1">Statement Day</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={accCycleDay}
+                        onChange={(e) => {
+                          const c = parseInt(e.target.value, 10) || 1;
+                          setAccCycleDay(e.target.value);
+                          const d = parseInt(accDueDay, 10) || 8;
+                          const grace = d > c ? d - c : (30 - c) + d;
+                          setAccGraceDays(String(grace));
+                        }}
+                        placeholder="18"
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-indigo-500/60 text-indigo-300 text-xs font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1">Settlement Due Day</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={accDueDay}
+                        onChange={(e) => {
+                          const d = parseInt(e.target.value, 10) || 1;
+                          setAccDueDay(e.target.value);
+                          const c = parseInt(accCycleDay, 10) || 18;
+                          const grace = d > c ? d - c : (30 - c) + d;
+                          setAccGraceDays(String(grace));
+                        }}
+                        placeholder="8"
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-amber-500/60 text-amber-300 text-xs font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1">Grace Float (Days)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={accGraceDays}
+                        onChange={(e) => setAccGraceDays(e.target.value)}
+                        placeholder="20"
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-emerald-500/60 text-emerald-300 text-xs font-mono"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block font-semibold text-slate-300 mb-1">Cycle Cutoff Day</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="31"
-                      value={accCycleDay}
-                      onChange={(e) => setAccCycleDay(e.target.value)}
-                      placeholder="e.g. 15"
-                      className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
-                    />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1">Next Settlement Due Date</label>
+                      <input
+                        type="date"
+                        value={accDueDate}
+                        onChange={(e) => setAccDueDate(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1">APR Rate (%)</label>
+                      <input
+                        type="number"
+                        value={accApr}
+                        onChange={(e) => setAccApr(e.target.value)}
+                        placeholder="15"
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block font-semibold text-slate-300 mb-1">Grace Float (Days)</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={accGraceDays}
-                      onChange={(e) => setAccGraceDays(e.target.value)}
-                      placeholder="e.g. 20"
-                      className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-slate-300 mb-1">APR Rate (%)</label>
-                    <input
-                      type="number"
-                      value={accApr}
-                      onChange={(e) => setAccApr(e.target.value)}
-                      placeholder="15"
-                      className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
-                    />
+
+                  {/* Shared Credit Limit Toggle (e.g. Maybank 2 Cards) */}
+                  <div className="p-3 bg-slate-950/80 border border-amber-500/30 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Shares Credit Limit (e.g. Maybank 2 Cards Amex + Visa)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          Pool this card's limit with another card under one combined facility.
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={accIsSharedLimit}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setAccIsSharedLimit(checked);
+                            if (checked) {
+                              if (!accSharedLimitGroupName) {
+                                setAccSharedLimitGroupName(`${accInstitution || 'Maybank'} Combined Limit`);
+                              }
+                              if (!accSharedCreditLimit) {
+                                setAccSharedCreditLimit(accCreditLimit || '12000');
+                              }
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                      </label>
+                    </div>
+
+                    {accIsSharedLimit && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-800/80 text-xs">
+                        <div>
+                          <label className="block text-slate-400 text-[11px] mb-0.5">Pooled Credit Limit</label>
+                          <input
+                            type="number"
+                            value={accSharedCreditLimit}
+                            onChange={(e) => setAccSharedCreditLimit(e.target.value)}
+                            placeholder="e.g. 12000"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 font-mono font-bold text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-[11px] mb-0.5">Shared Group Name</label>
+                          <input
+                            type="text"
+                            value={accSharedLimitGroupName}
+                            onChange={(e) => setAccSharedLimitGroupName(e.target.value)}
+                            placeholder="e.g. Maybank 2 Cards"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

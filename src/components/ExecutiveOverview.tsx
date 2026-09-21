@@ -40,22 +40,46 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
   onUpdateSpendingCap,
 }) => {
   const currency = settings.currency || 'MYR';
-  const totalBalance = (accounts || []).reduce((sum, a) => sum + a.totalBalance, 0);
-  const totalStatementDue = (accounts || []).reduce((sum, a) => sum + a.statementBalance, 0);
-  const totalCreditLimit = (accounts || []).reduce((sum, a) => sum + a.creditLimit, 0);
-  const totalMonthlyInstallments = (installments || []).reduce((sum, i) => sum + i.monthlyAmount, 0);
-  
-  // Calculate average utilization
-  const utilizationRatio = totalCreditLimit > 0 ? (totalBalance / totalCreditLimit) * 100 : 0;
-  
-  // Total penalties avoided by proactive sequencing
-  const totalLateFeesGuarded = accounts.reduce((sum, a) => sum + a.lateFee, 0);
-  // Average float days
-  const avgFloatDays = Math.round(
-    accounts.reduce((sum, a) => sum + a.gracePeriodDays, 0) / (accounts.length || 1)
+
+  // Segment accounts by financial nature:
+  // 1. Debt accounts (credit cards, BNPL, mortgages, loans - excluding liquid bank deposits)
+  const debtAccounts = (accounts || []).filter((a) => a.type !== 'bank_account');
+  // 2. Revolving credit accounts (credit cards & ewallet pay later/BNPL)
+  const revolvingAccounts = (accounts || []).filter(
+    (a) => a.type === 'credit_card' || a.type === 'ewallet_pay_later'
+  );
+  // 3. Bank/savings liquid cash accounts
+  const bankAccounts = (accounts || []).filter((a) => a.type === 'bank_account');
+  // 4. Fixed-term loan accounts
+  const loanAccounts = (accounts || []).filter(
+    (a) => a.type === 'housing_loan' || a.type === 'automotive_loan' || a.type === 'personal_loan' || a.type === 'other_loan'
   );
 
-  const installmentBurdenPercent = Math.round((totalMonthlyInstallments / settings.monthlyIncome) * 100);
+  // Financial aggregates
+  const totalOutstandingDebt = debtAccounts.reduce((sum, a) => sum + a.totalBalance, 0);
+  const totalBankSavings = bankAccounts.reduce((sum, a) => sum + a.totalBalance, 0);
+  const totalStatementDue = debtAccounts.reduce((sum, a) => sum + a.statementBalance, 0);
+
+  // Revolving Credit Metrics (Strictly Credit Cards & BNPL lines)
+  const revolvingActiveBalance = revolvingAccounts.reduce((sum, a) => sum + a.totalBalance, 0);
+  const revolvingCreditLimit = revolvingAccounts.reduce((sum, a) => sum + (a.creditLimit || 0), 0);
+  
+  // Calculate average revolving credit utilization
+  const utilizationRatio = revolvingCreditLimit > 0 ? (revolvingActiveBalance / revolvingCreditLimit) * 100 : 0;
+  
+  // Total penalties avoided by proactive sequencing on debt accounts
+  const totalLateFeesGuarded = debtAccounts.reduce((sum, a) => sum + a.lateFee, 0);
+  // Average float days on revolving accounts
+  const avgFloatDays = Math.round(
+    revolvingAccounts.reduce((sum, a) => sum + a.gracePeriodDays, 0) / (revolvingAccounts.length || 1)
+  );
+
+  // Installment commitments
+  const totalMonthlyInstallments = (installments || []).reduce((sum, i) => sum + (i.monthlyAmount || 0), 0);
+  const monthlyIncome = settings.monthlyIncome || 0;
+  const installmentBurdenPercent = monthlyIncome > 0 
+    ? Math.round((totalMonthlyInstallments / monthlyIncome) * 100) 
+    : 0;
 
   // Monthly Spending Cap & Progress calculations
   const spendingCap = settings.monthlySpendingCap ?? 5000;
@@ -136,18 +160,22 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
         {/* Metric 1: Total Outstanding */}
         <div className="bg-slate-900/90 rounded-xl p-4 border border-slate-800 shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Total Outstanding Balance</span>
+            <span>Total Outstanding Debt</span>
             <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
               <CreditCard className="w-3.5 h-3.5" />
             </div>
           </div>
           <div className="text-2xl font-bold text-white tracking-tight">
-            {formatCurrency(totalBalance, currency)}
+            {formatCurrency(totalOutstandingDebt, currency)}
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-            <span>{accounts.length} linked accounts</span>
+            <span>
+              {bankAccounts.length > 0 
+                ? `${formatCurrency(totalBankSavings, currency)} in Bank` 
+                : `${debtAccounts.length} debt accounts`}
+            </span>
             <span className="text-indigo-400 font-medium">
-              {accounts.filter(a => a.type === 'credit_card').length} Cards • {accounts.filter(a => a.type === 'ewallet_pay_later').length} BNPL
+              {revolvingAccounts.length} Cards/BNPL • {loanAccounts.length} Loans
             </span>
           </div>
         </div>
@@ -398,10 +426,10 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             <div>
               <span className="text-slate-400 text-[11px]">Active Balance: </span>
               <span className="font-bold text-white text-sm">
-                {formatCurrency(totalBalance, currency)}
+                {formatCurrency(revolvingActiveBalance, currency)}
               </span>
               <span className="text-slate-500 text-[11px] ml-1">
-                of {formatCurrency(totalCreditLimit, currency)} total limit
+                of {formatCurrency(revolvingCreditLimit, currency)} total limit
               </span>
             </div>
             <div className="text-right">
@@ -430,7 +458,7 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
             <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
               <span>0%</span>
               <span className="text-slate-400">
-                Recommended threshold: 30% ({formatCurrency(totalCreditLimit * 0.3, currency)})
+                Recommended threshold: 30% ({formatCurrency(revolvingCreditLimit * 0.3, currency)})
               </span>
               <span>100%</span>
             </div>

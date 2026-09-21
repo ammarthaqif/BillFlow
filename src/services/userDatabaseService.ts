@@ -13,8 +13,13 @@ import {
   PartnerConnection,
   PartnerConnectionRequest,
   PartnerConnectionPermissions,
-  QuickPayTemplate
+  QuickPayTemplate,
+  DatabaseBackupPackage
 } from '../types';
+import { 
+  downloadTransactionsCSV, 
+  generateTransactionsCSV 
+} from '../utils/csvExport';
 import { 
   INITIAL_ACCOUNTS, 
   INITIAL_INSTALLMENTS, 
@@ -1048,9 +1053,15 @@ export class UserDatabaseService {
   /**
    * Reset a user's dedicated database for a fresh restart
    */
+  /**
+   * Resets a user's dedicated database partition to a chosen clean template.
+   * 'standard': Clean starter with accounts at 0 debt balance, 0 expenses, 0 unsettled swipes.
+   * 'demo': Restores starter accounts with 6 sample transactions and 2 sample installment plans.
+   * 'blank': Pristine zero-data partition.
+   */
   static resetUserDatabase(
     userId: string, 
-    template: 'standard' | 'wife_starter' | 'blank' = 'standard'
+    template: 'standard' | 'wife_starter' | 'demo' | 'blank' = 'standard'
   ): UserDedicatedDatabase {
     const users = this.getRegisteredUsers();
     const user = users.find((u) => u.id === userId);
@@ -1075,26 +1086,15 @@ export class UserDatabaseService {
         ownerRole: user.familyRole,
         householdId,
         householdName,
+        totalBalance: a.type === 'bank_account' ? a.totalBalance : 0,
+        statementBalance: 0,
       }));
-      installments = INITIAL_INSTALLMENTS.slice(1, 3).map((i) => ({
-        ...i,
-        id: `inst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        ownerName: `${user.name} (${user.familyRole})`,
-        ownerRole: user.familyRole,
-        householdId,
-        householdName,
-      }));
-      expenses = INITIAL_EXPENSES.filter((e) => e.ownerRole !== 'husband').slice(0, 5).map((e) => ({
-        ...e,
-        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        ownerName: `${user.name} (${user.familyRole})`,
-        ownerRole: user.familyRole,
-        householdId,
-        householdName,
-      }));
+      installments = [];
+      expenses = []; // Guaranteed clean restart with 0 expenses
       standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(1, 3);
       quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
-    } else if (template === 'standard') {
+    } else if (template === 'demo') {
+      // Demo mode with sample expenses and active installments
       accounts = INITIAL_ACCOUNTS.slice(0, 3).map((a) => ({
         ...a,
         id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -1119,6 +1119,22 @@ export class UserDatabaseService {
         householdId,
         householdName,
       }));
+      standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
+      quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
+    } else if (template === 'standard') {
+      // Standard Clean Starter: Accounts initialized with RM 0 debt balances and 0 expenses/swipes
+      accounts = INITIAL_ACCOUNTS.slice(0, 3).map((a) => ({
+        ...a,
+        id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+        householdId,
+        householdName,
+        totalBalance: a.type === 'bank_account' ? a.totalBalance : 0,
+        statementBalance: 0,
+      }));
+      installments = []; // Clean restart with 0 active installment plans
+      expenses = []; // Clean restart with 0 logged expenses and 0 pending swipes awaiting settlement
       standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
       quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
     } // for 'blank', they remain empty arrays []
@@ -1146,6 +1162,29 @@ export class UserDatabaseService {
     localStorage.setItem(`${DB_PREFIX}${userId}`, JSON.stringify(resetDb));
     this.syncDatabaseToBackend(resetDb).catch(() => {});
     return resetDb;
+  }
+
+  /**
+   * Purges all expense records for the specified user while leaving accounts,
+   * installments, and standing instructions completely intact.
+   */
+  static clearUserExpenses(userId: string): UserDedicatedDatabase {
+    const db = this.loadUserDatabase(userId);
+    db.expenses = [];
+    db.lastUpdated = new Date().toISOString();
+    this.saveUserDatabase(db);
+    return db;
+  }
+
+  /**
+   * Purges only unsettled swipes awaiting settlement for the specified user.
+   */
+  static clearUnsettledSwipes(userId: string): UserDedicatedDatabase {
+    const db = this.loadUserDatabase(userId);
+    db.expenses = (db.expenses || []).filter((e) => e.status !== 'unsettled');
+    db.lastUpdated = new Date().toISOString();
+    this.saveUserDatabase(db);
+    return db;
   }
 
   /**
@@ -1386,6 +1425,292 @@ export class UserDatabaseService {
       accountsAdded: newAccounts.length,
       installmentsAdded: newInstallments.length,
       expensesAdded: newExpenses.length,
+    };
+  }
+
+  /**
+   * Create an unadulterated, comprehensive database backup package for personal safekeeping.
+   */
+  static createDatabaseBackup(
+    user: UserProfile,
+    db: UserDedicatedDatabase
+  ): DatabaseBackupPackage {
+    const totalDebt = (db.accounts || []).reduce((sum, a) => sum + (Number(a.statementBalance) || 0), 0);
+    const totalMonthlyInstallments = (db.installments || []).reduce((sum, i) => sum + (Number(i.monthlyAmount) || 0), 0);
+    const checksum = `bf_backup_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+    return {
+      format: 'billflow-database-backup',
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      checksum,
+      exportedBy: {
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        familyRole: user.familyRole,
+        householdName: user.householdName,
+        householdId: user.householdId || this.normalizeHouseholdId(user.householdName),
+      },
+      data: {
+        accounts: db.accounts || [],
+        installments: db.installments || [],
+        expenses: db.expenses || [],
+        standingInstructions: db.standingInstructions || [],
+        quickPayTemplates: db.quickPayTemplates || [],
+        settings: db.settings,
+        paidScheduleIds: db.paidScheduleIds || [],
+        scheduledScheduleIds: db.scheduledScheduleIds || [],
+      },
+      summary: {
+        totalAccounts: (db.accounts || []).length,
+        totalInstallments: (db.installments || []).length,
+        totalExpenses: (db.expenses || []).length,
+        totalStandingInstructions: (db.standingInstructions || []).length,
+        totalQuickPayTemplates: (db.quickPayTemplates || []).length,
+        totalDebt: Math.round(totalDebt * 100) / 100,
+        totalMonthlyInstallments: Math.round(totalMonthlyInstallments * 100) / 100,
+      },
+    };
+  }
+
+  /**
+   * Trigger a client-side JSON download of the complete database backup.
+   */
+  static downloadDatabaseBackup(
+    user: UserProfile,
+    db: UserDedicatedDatabase
+  ): { filename: string; jsonSize: number } {
+    const backup = this.createDatabaseBackup(user, db);
+    const jsonStr = JSON.stringify(backup, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const cleanName = user.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'user';
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `billflow-backup-${cleanName}-${dateStr}.json`;
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    return { filename, jsonSize: jsonStr.length };
+  }
+
+  /**
+   * Import and restore database from a backup JSON file or family sync package.
+   * Supports 'replace' (complete database restore) and 'merge' modes.
+   */
+  static restoreDatabaseBackup(
+    currentDb: UserDedicatedDatabase,
+    backupPayload: any,
+    options: {
+      mode: 'replace' | 'merge';
+      targetUser: UserProfile;
+    }
+  ): {
+    updatedDb: UserDedicatedDatabase;
+    accountsRestored: number;
+    installmentsRestored: number;
+    expensesRestored: number;
+    standingInstructionsRestored: number;
+    quickPayTemplatesRestored: number;
+    mode: 'replace' | 'merge';
+    originFormat: string;
+  } {
+    if (!backupPayload || typeof backupPayload !== 'object') {
+      throw new Error('Invalid backup file. The uploaded payload is not a valid JSON object.');
+    }
+
+    // Determine format
+    const format = backupPayload.format || (backupPayload.data?.accounts ? 'billflow-database-backup' : 'raw-database');
+
+    // Extract records defensively
+    let incomingAccounts: BillAccount[] = [];
+    let incomingInstallments: InstallmentPlan[] = [];
+    let incomingExpenses: ExpenseItem[] = [];
+    let incomingStandingInstructions: StandingInstruction[] = [];
+    let incomingQuickPayTemplates: QuickPayTemplate[] = [];
+    let incomingSettings: UserSettings | undefined;
+    let incomingPaidScheduleIds: string[] = [];
+    let incomingScheduledScheduleIds: string[] = [];
+
+    if (backupPayload.data) {
+      incomingAccounts = Array.isArray(backupPayload.data.accounts) ? backupPayload.data.accounts : [];
+      incomingInstallments = Array.isArray(backupPayload.data.installments) ? backupPayload.data.installments : [];
+      incomingExpenses = Array.isArray(backupPayload.data.expenses) ? backupPayload.data.expenses : [];
+      incomingStandingInstructions = Array.isArray(backupPayload.data.standingInstructions) ? backupPayload.data.standingInstructions : [];
+      incomingQuickPayTemplates = Array.isArray(backupPayload.data.quickPayTemplates) ? backupPayload.data.quickPayTemplates : [];
+      incomingSettings = backupPayload.data.settings;
+      incomingPaidScheduleIds = Array.isArray(backupPayload.data.paidScheduleIds) ? backupPayload.data.paidScheduleIds : [];
+      incomingScheduledScheduleIds = Array.isArray(backupPayload.data.scheduledScheduleIds) ? backupPayload.data.scheduledScheduleIds : [];
+    } else {
+      // Direct raw database structure fallback
+      incomingAccounts = Array.isArray(backupPayload.accounts) ? backupPayload.accounts : [];
+      incomingInstallments = Array.isArray(backupPayload.installments) ? backupPayload.installments : [];
+      incomingExpenses = Array.isArray(backupPayload.expenses) ? backupPayload.expenses : [];
+      incomingStandingInstructions = Array.isArray(backupPayload.standingInstructions) ? backupPayload.standingInstructions : [];
+      incomingQuickPayTemplates = Array.isArray(backupPayload.quickPayTemplates) ? backupPayload.quickPayTemplates : [];
+      incomingSettings = backupPayload.settings;
+      incomingPaidScheduleIds = Array.isArray(backupPayload.paidScheduleIds) ? backupPayload.paidScheduleIds : [];
+      incomingScheduledScheduleIds = Array.isArray(backupPayload.scheduledScheduleIds) ? backupPayload.scheduledScheduleIds : [];
+    }
+
+    if (incomingAccounts.length === 0 && incomingExpenses.length === 0 && incomingInstallments.length === 0) {
+      throw new Error('The backup file does not contain any valid accounts, installments, or expense transactions.');
+    }
+
+    const targetHId = options.targetUser.householdId || currentDb.householdId || this.normalizeHouseholdId(options.targetUser.householdName);
+    const targetHName = options.targetUser.householdName || currentDb.householdName;
+
+    if (options.mode === 'replace') {
+      const updatedDb: UserDedicatedDatabase = {
+        databaseId: currentDb.databaseId,
+        userId: currentDb.userId,
+        userEmail: currentDb.userEmail,
+        householdId: targetHId,
+        householdName: targetHName,
+        version: (currentDb.version || 1) + 1,
+        lastUpdated: new Date().toISOString(),
+        alertThresholds: currentDb.alertThresholds || [7, 3, 1],
+        accounts: incomingAccounts.map((a) => ({
+          ...a,
+          householdId: a.householdId || targetHId,
+          householdName: a.householdName || targetHName,
+        })),
+        installments: incomingInstallments.map((i) => ({
+          ...i,
+          householdId: i.householdId || targetHId,
+          householdName: i.householdName || targetHName,
+        })),
+        expenses: incomingExpenses.map((e) => ({
+          ...e,
+          householdId: e.householdId || targetHId,
+          householdName: e.householdName || targetHName,
+        })),
+        standingInstructions: incomingStandingInstructions,
+        bankScheduledTransactions: currentDb.bankScheduledTransactions || [],
+        quickPayTemplates: incomingQuickPayTemplates.length > 0 ? incomingQuickPayTemplates : (currentDb.quickPayTemplates || []),
+        settings: incomingSettings ? { ...currentDb.settings, ...incomingSettings } : currentDb.settings,
+        paidScheduleIds: incomingPaidScheduleIds,
+        scheduledScheduleIds: incomingScheduledScheduleIds,
+      };
+
+      this.saveUserDatabase(updatedDb);
+
+      return {
+        updatedDb,
+        accountsRestored: updatedDb.accounts.length,
+        installmentsRestored: updatedDb.installments.length,
+        expensesRestored: (updatedDb.expenses || []).length,
+        standingInstructionsRestored: (updatedDb.standingInstructions || []).length,
+        quickPayTemplatesRestored: (updatedDb.quickPayTemplates || []).length,
+        mode: 'replace',
+        originFormat: format,
+      };
+    }
+
+    // Merge mode: Add records that don't collide or update existing
+    const existingAccIds = new Set(currentDb.accounts.map((a) => a.id));
+    const mergedAccounts: BillAccount[] = [...currentDb.accounts];
+    let accountsAdded = 0;
+
+    for (const inAcc of incomingAccounts) {
+      if (!existingAccIds.has(inAcc.id)) {
+        mergedAccounts.push({
+          ...inAcc,
+          householdId: targetHId,
+          householdName: targetHName,
+        });
+        existingAccIds.add(inAcc.id);
+        accountsAdded++;
+      }
+    }
+
+    const existingInstIds = new Set(currentDb.installments.map((i) => i.id));
+    const mergedInstallments: InstallmentPlan[] = [...currentDb.installments];
+    let installmentsAdded = 0;
+
+    for (const inInst of incomingInstallments) {
+      if (!existingInstIds.has(inInst.id)) {
+        mergedInstallments.push({
+          ...inInst,
+          householdId: targetHId,
+          householdName: targetHName,
+        });
+        existingInstIds.add(inInst.id);
+        installmentsAdded++;
+      }
+    }
+
+    const existingExpIds = new Set((currentDb.expenses || []).map((e) => e.id));
+    const mergedExpenses: ExpenseItem[] = [...(currentDb.expenses || [])];
+    let expensesAdded = 0;
+
+    for (const inExp of incomingExpenses) {
+      if (!existingExpIds.has(inExp.id)) {
+        mergedExpenses.push({
+          ...inExp,
+          householdId: targetHId,
+          householdName: targetHName,
+        });
+        existingExpIds.add(inExp.id);
+        expensesAdded++;
+      }
+    }
+
+    const existingSiIds = new Set((currentDb.standingInstructions || []).map((s) => s.id));
+    const mergedStandingInstructions: StandingInstruction[] = [...(currentDb.standingInstructions || [])];
+    let siAdded = 0;
+
+    for (const inSi of incomingStandingInstructions) {
+      if (!existingSiIds.has(inSi.id)) {
+        mergedStandingInstructions.push(inSi);
+        existingSiIds.add(inSi.id);
+        siAdded++;
+      }
+    }
+
+    const existingTplIds = new Set((currentDb.quickPayTemplates || []).map((t) => t.id));
+    const mergedTemplates: QuickPayTemplate[] = [...(currentDb.quickPayTemplates || [])];
+    let tplAdded = 0;
+
+    for (const inTpl of incomingQuickPayTemplates) {
+      if (!existingTplIds.has(inTpl.id)) {
+        mergedTemplates.push(inTpl);
+        existingTplIds.add(inTpl.id);
+        tplAdded++;
+      }
+    }
+
+    const updatedDb: UserDedicatedDatabase = {
+      ...currentDb,
+      householdId: targetHId,
+      householdName: targetHName,
+      version: (currentDb.version || 1) + 1,
+      lastUpdated: new Date().toISOString(),
+      accounts: mergedAccounts,
+      installments: mergedInstallments,
+      expenses: mergedExpenses,
+      standingInstructions: mergedStandingInstructions,
+      quickPayTemplates: mergedTemplates,
+      settings: incomingSettings ? { ...currentDb.settings, ...incomingSettings } : currentDb.settings,
+    };
+
+    this.saveUserDatabase(updatedDb);
+
+    return {
+      updatedDb,
+      accountsRestored: accountsAdded,
+      installmentsRestored: installmentsAdded,
+      expensesRestored: expensesAdded,
+      standingInstructionsRestored: siAdded,
+      quickPayTemplatesRestored: tplAdded,
+      mode: 'merge',
+      originFormat: format,
     };
   }
 

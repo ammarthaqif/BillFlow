@@ -8,7 +8,12 @@ import {
   AlertCircle,
   Percent,
   Calendar,
-  DollarSign
+  DollarSign,
+  Layers,
+  Clock,
+  Info,
+  ShieldCheck,
+  ArrowRight
 } from 'lucide-react';
 import { BillAccount, AccountType } from '../types';
 import { formatCurrency, CurrencyCode, getCurrencyConfig } from '../utils/currency';
@@ -18,7 +23,10 @@ interface EditAccountModalProps {
   isOpen: boolean;
   onClose: () => void;
   account: BillAccount | null;
-  onUpdateAccount: (updatedAccount: BillAccount) => void;
+  allAccounts?: BillAccount[];
+  onUpdateAccount?: (updatedAccount: BillAccount) => void;
+  onSave?: (updatedAccount: BillAccount) => void;
+  onDelete?: (accountId: string) => void;
   currency?: CurrencyCode | string;
 }
 
@@ -26,7 +34,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   isOpen,
   onClose,
   account,
+  allAccounts = [],
   onUpdateAccount,
+  onSave,
+  onDelete,
   currency = 'MYR',
 }) => {
   const currencyConfig = getCurrencyConfig(currency);
@@ -39,12 +50,50 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   const [creditLimit, setCreditLimit] = useState<number>(0);
   const [apr, setApr] = useState<number>(0);
   const [lateFee, setLateFee] = useState<number>(0);
-  const [cycleDay, setCycleDay] = useState<number>(1);
-  const [gracePeriodDays, setGracePeriodDays] = useState<number>(25);
+  const [cycleDay, setCycleDay] = useState<number>(18);
+  const [dueDay, setDueDay] = useState<number>(8);
+  const [gracePeriodDays, setGracePeriodDays] = useState<number>(20);
   const [dueDate, setDueDate] = useState('');
   const [minPayment, setMinPayment] = useState<number>(0);
   const [color, setColor] = useState('#4f46e5');
   const [error, setError] = useState<string | null>(null);
+
+  // Shared credit limit states (e.g. Maybank 2 Cards Amex & Visa)
+  const [isSharedLimit, setIsSharedLimit] = useState<boolean>(false);
+  const [sharedLimitGroupId, setSharedLimitGroupId] = useState<string>('');
+  const [sharedLimitGroupName, setSharedLimitGroupName] = useState<string>('');
+  const [sharedCreditLimit, setSharedCreditLimit] = useState<number>(0);
+  const [selectedPairedCardId, setSelectedPairedCardId] = useState<string>('');
+
+  // Helper to calculate next upcoming due date from a day-of-month (1-31)
+  const calculateNextDueDate = (targetDay: number) => {
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    const currentDate = today.getDate();
+
+    let targetMonth = currentMonth;
+    let targetYear = currentYear;
+    if (currentDate > targetDay) {
+      targetMonth += 1;
+      if (targetMonth > 11) {
+        targetMonth = 0;
+        targetYear += 1;
+      }
+    }
+    const safeDay = Math.min(targetDay, 28); // safe day representation
+    const d = new Date(targetYear, targetMonth, safeDay);
+    return d.toISOString().split('T')[0];
+  };
+
+  // Helper to compute float days between cycle issue day and due day
+  const computeGraceFloat = (cycle: number, due: number) => {
+    if (due > cycle) {
+      return due - cycle;
+    } else {
+      return (30 - cycle) + due;
+    }
+  };
 
   useEffect(() => {
     if (account) {
@@ -56,20 +105,115 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       setCreditLimit(account.creditLimit || 0);
       setApr(account.apr || 0);
       setLateFee(account.lateFee || 0);
-      setCycleDay(account.cycleDay || 1);
-      setGracePeriodDays(account.gracePeriodDays || 25);
-      setDueDate(account.dueDate || '');
+      
+      const cDay = account.cycleDay || 18;
+      setCycleDay(cDay);
+
+      // Determine due day
+      let initialDueDay = account.dueDay;
+      if (!initialDueDay && account.dueDate) {
+        const parts = account.dueDate.split('-');
+        if (parts.length === 3) {
+          initialDueDay = parseInt(parts[2], 10);
+        }
+      }
+      if (!initialDueDay) {
+        initialDueDay = Math.min(31, ((cDay + (account.gracePeriodDays || 20) - 1) % 30) + 1);
+      }
+      setDueDay(initialDueDay);
+      setGracePeriodDays(account.gracePeriodDays || computeGraceFloat(cDay, initialDueDay));
+      setDueDate(account.dueDate || calculateNextDueDate(initialDueDay));
+
       setMinPayment(account.minPayment || 0);
       setColor(account.color || '#4f46e5');
+
+      // Shared limit setup
+      const hasShared = !!account.isSharedLimit;
+      setIsSharedLimit(hasShared);
+      setSharedLimitGroupId(account.sharedLimitGroupId || (hasShared ? `group-${account.id}` : ''));
+      setSharedLimitGroupName(account.sharedLimitGroupName || (hasShared ? `${account.institution || 'Bank'} Combined Limit` : ''));
+      setSharedCreditLimit(account.sharedCreditLimit || account.creditLimit || 0);
+
+      // Look for paired card in the same shared limit group
+      if (hasShared && account.sharedLimitGroupId && allAccounts.length > 0) {
+        const paired = allAccounts.find(
+          (a) => a.id !== account.id && a.isSharedLimit && a.sharedLimitGroupId === account.sharedLimitGroupId
+        );
+        if (paired) {
+          setSelectedPairedCardId(paired.id);
+        }
+      }
+
       setError(null);
     }
-  }, [account]);
+  }, [account, allAccounts]);
 
   if (!isOpen || !account) return null;
 
   const isBank = account.type === 'bank_account';
   const isCard = account.type === 'credit_card';
   const isBnpl = account.type === 'ewallet_pay_later';
+
+  // Sibling cards available to link for shared credit limits
+  const otherCreditCards = allAccounts.filter(
+    (a) => a.id !== account.id && (a.type === 'credit_card' || a.type === 'ewallet_pay_later')
+  );
+
+  // When user updates cycleDay (statement issue day)
+  const handleCycleDayChange = (newVal: number) => {
+    const safeCycle = Math.min(31, Math.max(1, newVal));
+    setCycleDay(safeCycle);
+    const float = computeGraceFloat(safeCycle, dueDay);
+    setGracePeriodDays(float);
+  };
+
+  // When user updates dueDay (settlement due day)
+  const handleDueDayChange = (newVal: number) => {
+    const safeDue = Math.min(31, Math.max(1, newVal));
+    setDueDay(safeDue);
+    const float = computeGraceFloat(cycleDay, safeDue);
+    setGracePeriodDays(float);
+    setDueDate(calculateNextDueDate(safeDue));
+  };
+
+  // When user updates dueDate directly
+  const handleDueDateChange = (newDateStr: string) => {
+    setDueDate(newDateStr);
+    const parts = newDateStr.split('-');
+    if (parts.length === 3) {
+      const day = parseInt(parts[2], 10);
+      if (!isNaN(day) && day >= 1 && day <= 31) {
+        setDueDay(day);
+        setGracePeriodDays(computeGraceFloat(cycleDay, day));
+      }
+    }
+  };
+
+  // When user updates gracePeriodDays directly
+  const handleGraceDaysChange = (newGrace: number) => {
+    const safeGrace = Math.max(1, Math.min(60, newGrace));
+    setGracePeriodDays(safeGrace);
+    const calculatedDue = ((cycleDay + safeGrace - 1) % 30) + 1;
+    setDueDay(calculatedDue);
+    setDueDate(calculateNextDueDate(calculatedDue));
+  };
+
+  // Handle paired card selection for shared credit limits
+  const handleSelectPairedCard = (pairedId: string) => {
+    setSelectedPairedCardId(pairedId);
+    if (!pairedId) return;
+
+    const paired = allAccounts.find((a) => a.id === pairedId);
+    if (paired) {
+      const gId = paired.sharedLimitGroupId || `shared-${paired.id.slice(0, 8)}`;
+      setSharedLimitGroupId(gId);
+      const gName = paired.sharedLimitGroupName || `${account.institution || paired.institution} 2 Cards Combined Limit`;
+      setSharedLimitGroupName(gName);
+      const limit = paired.sharedCreditLimit || paired.creditLimit || creditLimit;
+      setSharedCreditLimit(limit);
+      setCreditLimit(limit);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,6 +222,8 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       return;
     }
 
+    const effectiveLimit = isSharedLimit ? (sharedCreditLimit || creditLimit) : creditLimit;
+
     const updated: BillAccount = {
       ...account,
       name: name.trim(),
@@ -85,18 +231,36 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       accountNumberMask: accountNumberMask.trim() || account.accountNumberMask,
       statementBalance: Math.max(0, Number(statementBalance) || 0),
       totalBalance: Math.max(0, Number(totalBalance) || 0),
-      creditLimit: Math.max(0, Number(creditLimit) || 0),
+      currentBalance: isBank ? Math.max(0, Number(totalBalance) || 0) : undefined,
+      creditLimit: Math.max(0, Number(effectiveLimit) || 0),
       apr: Math.max(0, Number(apr) || 0),
       lateFee: Math.max(0, Number(lateFee) || 0),
       cycleDay: Math.min(31, Math.max(1, Number(cycleDay) || 1)),
+      dueDay: Math.min(31, Math.max(1, Number(dueDay) || 1)),
       gracePeriodDays: Math.max(0, Number(gracePeriodDays) || 0),
       dueDate: dueDate || account.dueDate,
       minPayment: Math.max(0, Number(minPayment) || 0),
       color: color || account.color,
       lastSyncedAt: new Date().toISOString(),
+
+      // Shared Credit Limit fields
+      isSharedLimit: !!isSharedLimit,
+      sharedLimitGroupId: isSharedLimit 
+        ? (sharedLimitGroupId || `shared-${account.id}`) 
+        : undefined,
+      sharedLimitGroupName: isSharedLimit 
+        ? (sharedLimitGroupName.trim() || `${account.name} Combined Limit`) 
+        : undefined,
+      sharedCreditLimit: isSharedLimit 
+        ? Math.max(0, Number(sharedCreditLimit) || Number(creditLimit) || 0) 
+        : undefined,
     };
 
-    onUpdateAccount(updated);
+    if (onUpdateAccount) {
+      onUpdateAccount(updated);
+    } else if (onSave) {
+      onSave(updated);
+    }
     onClose();
   };
 
@@ -123,7 +287,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Modify balances, credit limits, cycle cutoffs, and penalty parameters.
+                Configure balances, shared credit limits, statement issue day, and settlement due dates.
               </p>
             </div>
           </div>
@@ -140,68 +304,67 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
           <div className="space-y-3 bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Account Name</label>
+                <label className="block text-slate-300 font-medium mb-1">Account Display Name</label>
                 <input
                   type="text"
-                  required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Maybank 2 Platinum"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  placeholder="e.g. Maybank 2 Cards (American Express)"
+                  required
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Financial Institution</label>
+                <label className="block text-slate-300 font-medium mb-1">Financial Institution</label>
                 <input
                   type="text"
-                  required
                   value={institution}
                   onChange={(e) => setInstitution(e.target.value)}
-                  placeholder="e.g. Maybank, CIMB, Grab"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  placeholder="e.g. Maybank / Public Bank"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Mask / Account Number</label>
+                <label className="block text-slate-300 font-medium mb-1">Card / Account Mask (Last 4 Digits)</label>
                 <input
                   type="text"
                   value={accountNumberMask}
                   onChange={(e) => setAccountNumberMask(e.target.value)}
-                  placeholder="•••• 1234"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  placeholder="•••• 1094"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Accent Theme Color</label>
+                <label className="block text-slate-300 font-medium mb-1">Theme Accent Color</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
                     value={color}
                     onChange={(e) => setColor(e.target.value)}
-                    className="w-9 h-9 rounded-xl bg-transparent cursor-pointer border border-slate-700"
+                    className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer"
                   />
-                  <span className="font-mono text-slate-400 uppercase">{color}</span>
+                  <span className="text-slate-400 font-mono">{color}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Balances & Limits */}
+          {/* Balances & Credit Limits */}
           <div className="space-y-3 bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
             <h4 className="font-bold text-slate-200 flex items-center gap-1.5">
               <DollarSign className="w-4 h-4 text-emerald-400" />
-              <span>Balances & Limits ({currencyConfig.code})</span>
+              <span>{isBank ? 'Account Balances & Funds' : 'Current Outstanding Balances'}</span>
             </h4>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-slate-300 font-medium mb-1">
-                  {isBank ? 'Available Liquid Balance' : 'Total Outstanding Balance'}
+                  {isBank ? 'Current Liquid Balance' : 'Total Current Balance (Unsettled)'}
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2 text-slate-400 font-bold">{currencyConfig.symbol}</span>
@@ -209,7 +372,6 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                     type="number"
                     step="0.01"
                     min="0"
-                    required
                     value={totalBalance}
                     onChange={(e) => setTotalBalance(parseFloat(e.target.value) || 0)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
@@ -219,9 +381,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
               {!isBank && (
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    Current Statement Balance Due
-                  </label>
+                  <label className="block text-slate-300 font-medium mb-1">Billed Statement Balance</label>
                   <div className="relative">
                     <span className="absolute left-3 top-2 text-slate-400 font-bold">{currencyConfig.symbol}</span>
                     <input
@@ -230,7 +390,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       min="0"
                       value={statementBalance}
                       onChange={(e) => setStatementBalance(parseFloat(e.target.value) || 0)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-amber-400 font-mono font-bold focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
@@ -240,7 +400,9 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
             {!isBank && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Approved Credit Limit</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    {isSharedLimit ? 'Card Credit Limit' : 'Approved Credit Limit'}
+                  </label>
                   <div className="relative">
                     <span className="absolute left-3 top-2 text-slate-400 font-bold">{currencyConfig.symbol}</span>
                     <input
@@ -248,7 +410,13 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       step="0.01"
                       min="0"
                       value={creditLimit}
-                      onChange={(e) => setCreditLimit(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setCreditLimit(val);
+                        if (isSharedLimit && !sharedCreditLimit) {
+                          setSharedCreditLimit(val);
+                        }
+                      }}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -272,72 +440,268 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
             )}
           </div>
 
-          {/* Cycle & Penalties (For cards / BNPL) */}
+          {/* SHARED CREDIT LIMIT SECTION (e.g. Maybank 2 Cards: Amex & Visa sharing one limit) */}
+          {(isCard || isBnpl) && (
+            <div className="space-y-3 bg-slate-950/60 border border-amber-500/30 rounded-2xl p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="p-1 rounded-lg bg-amber-500/20 text-amber-400">
+                    <Layers className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h4 className="font-bold text-white text-xs sm:text-sm">
+                      Shared Credit Limit (e.g. Maybank 2 Cards)
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Does this card share a combined credit limit with another card?
+                    </p>
+                  </div>
+                </div>
+
+                {/* Toggle switch */}
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isSharedLimit}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsSharedLimit(checked);
+                      if (checked) {
+                        if (!sharedLimitGroupId) {
+                          setSharedLimitGroupId(`shared-${account.institution?.toLowerCase() || 'bank'}-pair`);
+                        }
+                        if (!sharedLimitGroupName) {
+                          setSharedLimitGroupName(`${account.institution || 'Maybank'} 2 Cards Combined Limit`);
+                        }
+                        if (!sharedCreditLimit) {
+                          setSharedCreditLimit(creditLimit || 12000);
+                        }
+                      }
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                </label>
+              </div>
+
+              {isSharedLimit && (
+                <div className="space-y-3 pt-3 border-t border-slate-800">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-300 font-medium mb-1">
+                        Combined / Pooled Credit Limit
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2 text-amber-400 font-bold">{currencyConfig.symbol}</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={sharedCreditLimit}
+                          onChange={(e) => setSharedCreditLimit(parseFloat(e.target.value) || 0)}
+                          placeholder="e.g. 15000"
+                          className="w-full bg-slate-900 border border-amber-500/50 rounded-xl pl-10 pr-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">
+                        Total pooled limit across paired cards.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-medium mb-1">
+                        Shared Limit Group Name
+                      </label>
+                      <input
+                        type="text"
+                        value={sharedLimitGroupName}
+                        onChange={(e) => setSharedLimitGroupName(e.target.value)}
+                        placeholder="e.g. Maybank 2 Cards (Amex + Visa)"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {otherCreditCards.length > 0 && (
+                    <div>
+                      <label className="block text-slate-300 font-medium mb-1">
+                        Pair with Existing Card (Optional Quick Link)
+                      </label>
+                      <select
+                        value={selectedPairedCardId}
+                        onChange={(e) => handleSelectPairedCard(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">-- Select sibling card to share limit with --</option>
+                        {otherCreditCards.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.institution}) • Current Limit: {formatCurrency(c.creditLimit, currency)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Visual explanatory note */}
+                  <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/20 text-amber-200/90 text-[11px] flex items-start gap-2">
+                    <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <p>
+                      In cards like the <strong>Maybank 2 Card (Amex & Visa)</strong>, the bank assigns one combined credit limit. Spending on either card reduces the remaining available limit for both cards. Saving this updates the pooled limit group.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STATEMENT ISSUANCE DAY & SETTLEMENT DUE DATE (Cards & BNPL) */}
           {!isBank && (
-            <div className="space-y-3 bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
-              <h4 className="font-bold text-slate-200 flex items-center gap-1.5">
-                <Calendar className="w-4 h-4 text-indigo-400" />
-                <span>Billing Cycle & Terms</span>
-              </h4>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="space-y-3 bg-slate-950/60 border border-indigo-500/30 rounded-2xl p-4">
+              <div className="flex items-center gap-2">
+                <span className="p-1 rounded-lg bg-indigo-500/20 text-indigo-400">
+                  <Calendar className="w-4 h-4" />
+                </span>
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Cycle Cutoff Day</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="31"
-                    value={cycleDay}
-                    onChange={(e) => setCycleDay(parseInt(e.target.value) || 1)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Grace Period (Days)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="60"
-                    value={gracePeriodDays}
-                    onChange={(e) => setGracePeriodDays(parseInt(e.target.value) || 0)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">APR Interest (%)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={apr}
-                    onChange={(e) => setApr(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Late Fee Penalty</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={lateFee}
-                    onChange={(e) => setLateFee(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-rose-400 font-mono font-bold focus:outline-none focus:border-indigo-500"
-                  />
+                  <h4 className="font-bold text-white text-xs sm:text-sm">
+                    Statement Issue Day & Settlement Due Date
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Specify recurring monthly statement dates and settlement payment cutoff.
+                  </p>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Next Payment Due Date</label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Statement Issue Day */}
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Day Statement is Issued
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={cycleDay}
+                      onChange={(e) => handleCycleDayChange(parseInt(e.target.value) || 1)}
+                      className="w-full bg-slate-900 border border-indigo-500/50 rounded-xl px-3 py-2 text-indigo-300 font-mono font-bold focus:outline-none focus:border-indigo-400"
+                    />
+                    <span className="absolute right-3 top-2 text-slate-400 text-[11px]">th of month</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Cycle closing / cutoff date
+                  </span>
+                </div>
+
+                {/* Settlement Due Day */}
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Settlement Due Day
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={dueDay}
+                      onChange={(e) => handleDueDayChange(parseInt(e.target.value) || 1)}
+                      className="w-full bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-400"
+                    />
+                    <span className="absolute right-3 top-2 text-slate-400 text-[11px]">th of month</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Payment deadline each month
+                  </span>
+                </div>
+
+                {/* Grace Period Float Days */}
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Grace Float (Days)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={gracePeriodDays}
+                      onChange={(e) => handleGraceDaysChange(parseInt(e.target.value) || 1)}
+                      className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl px-3 py-2 text-emerald-300 font-mono font-bold focus:outline-none focus:border-emerald-400"
+                    />
+                    <span className="absolute right-3 top-2 text-slate-400 text-[11px]">days</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    0% interest-free window
+                  </span>
+                </div>
+              </div>
+
+              {/* Exact Upcoming Payment Due Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Next Settlement Due Date
+                  </label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => handleDueDateChange(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Calendar date when next settlement payment must be made
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">APR Interest (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={apr}
+                      onChange={(e) => setApr(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Late Penalty</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={lateFee}
+                      onChange={(e) => setLateFee(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-rose-400 font-mono font-bold focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Interactive Schedule Visual Summary Card */}
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400">
+                    <Clock className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <span className="text-slate-400 text-[11px] block">Billing Cycle Flow</span>
+                    <span className="font-semibold text-white">
+                      Statement Issued: <strong>Day {cycleDay}</strong>
+                    </span>
+                  </div>
+                </div>
+
+                <ArrowRight className="w-4 h-4 text-slate-500" />
+
+                <div className="text-right">
+                  <span className="text-slate-400 text-[11px] block">Settlement Deadline</span>
+                  <span className="font-semibold text-amber-400">
+                    Day {dueDay} • Next {dueDate}
+                  </span>
+                </div>
               </div>
             </div>
           )}

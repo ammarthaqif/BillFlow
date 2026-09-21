@@ -24,8 +24,19 @@ interface QuickPayExecuteModalProps {
   onClose: () => void;
   template: QuickPayTemplate | null;
   accounts: BillAccount[];
-  currency: CurrencyCode;
-  onExecute: (
+  currency: CurrencyCode | string;
+  onExecute?: (
+    template: QuickPayTemplate,
+    executionDetails: {
+      amount: number;
+      sourceAccountId?: string;
+      settlementMethod: SettlementMethod;
+      referenceNumber: string;
+      date: string;
+      notes?: string;
+    }
+  ) => void;
+  onExecuteSettlement?: (
     template: QuickPayTemplate,
     executionDetails: {
       amount: number;
@@ -45,9 +56,8 @@ export const QuickPayExecuteModal: React.FC<QuickPayExecuteModalProps> = ({
   accounts,
   currency,
   onExecute,
+  onExecuteSettlement,
 }) => {
-  if (!isOpen || !template) return null;
-
   const currencyConfig = getCurrencyConfig(currency);
   const bankAccounts = accounts.filter((a) => a.type === 'bank_account');
   const allFundingAccounts = accounts.filter(
@@ -56,19 +66,19 @@ export const QuickPayExecuteModal: React.FC<QuickPayExecuteModalProps> = ({
 
   // Initial source account determination
   const defaultSourceAccount = 
-    accounts.find((a) => a.id === template.sourceAccountId) ||
+    accounts.find((a) => a.id === template?.sourceAccountId) ||
     bankAccounts[0] ||
     accounts[0];
 
-  const [amount, setAmount] = useState<number>(template.defaultAmount);
-  const [amountInput, setAmountInput] = useState<string>(template.defaultAmount.toString());
+  const [amount, setAmount] = useState<number>(template?.defaultAmount ?? 0);
+  const [amountInput, setAmountInput] = useState<string>((template?.defaultAmount ?? 0).toString());
   const [selectedSourceAccountId, setSelectedSourceAccountId] = useState<string>(defaultSourceAccount?.id || '');
-  const [settlementMethod, setSettlementMethod] = useState<SettlementMethod>(template.settlementMethod || 'jompay');
+  const [settlementMethod, setSettlementMethod] = useState<SettlementMethod>(template?.settlementMethod || 'jompay');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [referenceNumber, setReferenceNumber] = useState<string>(
-    () => `QP-${(template.title || 'BILL').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'QP'}-${Date.now().toString(36).toUpperCase()}`
+    () => `QP-${((template?.title || 'BILL')).replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'QP'}-${Date.now().toString(36).toUpperCase()}`
   );
-  const [notes, setNotes] = useState<string>(template.notes || `Settled via Quick Pay: ${template.title || 'Bill'}`);
+  const [notes, setNotes] = useState<string>(template?.notes || (template ? `Settled via Quick Pay: ${template.title || 'Bill'}` : ''));
   const [copiedRef, setCopiedRef] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -87,6 +97,8 @@ export const QuickPayExecuteModal: React.FC<QuickPayExecuteModalProps> = ({
     setCopiedRef(false);
   }, [template?.id]);
 
+  if (!isOpen || !template) return null;
+
   const selectedSourceAccount = accounts.find((a) => a.id === selectedSourceAccountId);
 
   const handleAmountInputChange = (val: string) => {
@@ -104,12 +116,14 @@ export const QuickPayExecuteModal: React.FC<QuickPayExecuteModalProps> = ({
   };
 
   const resetAmount = () => {
-    setAmount(template.defaultAmount);
-    setAmountInput(template.defaultAmount.toString());
+    if (!template) return;
+    const def = template.defaultAmount ?? 0;
+    setAmount(def);
+    setAmountInput(def.toString());
   };
 
   const handleCopyRef = () => {
-    if (template.beneficiaryAccountOrRef) {
+    if (template?.beneficiaryAccountOrRef) {
       navigator.clipboard?.writeText(template.beneficiaryAccountOrRef);
       setCopiedRef(true);
       setTimeout(() => setCopiedRef(false), 2000);
@@ -118,18 +132,21 @@ export const QuickPayExecuteModal: React.FC<QuickPayExecuteModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (amount <= 0) return;
+    if (amount <= 0 || !template) return;
 
     setIsSubmitting(true);
     try {
-      onExecute(template, {
-        amount,
-        sourceAccountId: selectedSourceAccountId || undefined,
-        settlementMethod,
-        referenceNumber: referenceNumber.trim() || `QP-${Date.now().toString(36).toUpperCase()}`,
-        date,
-        notes: notes.trim(),
-      });
+      const executeFn = onExecuteSettlement || onExecute;
+      if (executeFn) {
+        executeFn(template, {
+          amount,
+          sourceAccountId: selectedSourceAccountId || undefined,
+          settlementMethod,
+          referenceNumber: referenceNumber.trim() || `QP-${Date.now().toString(36).toUpperCase()}`,
+          date,
+          notes: notes.trim(),
+        });
+      }
       onClose();
     } finally {
       setIsSubmitting(false);

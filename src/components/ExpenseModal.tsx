@@ -30,7 +30,8 @@ import {
   Repeat,
   CalendarClock,
   Gift,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import { 
   ExpenseItem, 
@@ -68,6 +69,7 @@ interface ExpenseModalProps {
   expenses?: ExpenseItem[];
   currency?: CurrencyCode;
   initialAccountId?: string;
+  onDeleteExpense?: (expenseId: string) => void;
 }
 
 export const ExpenseModal: React.FC<ExpenseModalProps> = ({
@@ -79,8 +81,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   expenses = [],
   currency = 'MYR',
   initialAccountId,
+  onDeleteExpense,
 }) => {
   const currencyConfig = getCurrencyConfig(currency);
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Form states
   const [title, setTitle] = useState('');
@@ -295,8 +300,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
-
   const selectedAccount = accounts.find((a) => a.id === accountId);
   const numAmount = typeof amount === 'number' ? amount : 0;
 
@@ -391,6 +394,8 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     );
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
@@ -1295,21 +1300,52 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
           </div>
 
           {/* Actions Bar */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors font-semibold cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer flex items-center gap-2"
-            >
-              <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-              <span>{editingExpense ? 'Save Changes' : 'Record Bill / Expense'}</span>
-            </button>
+          <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-slate-800">
+            <div>
+              {editingExpense && onDeleteExpense && (
+                confirmDelete ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeleteExpense(editingExpense.id);
+                      onClose();
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 animate-pulse transition-all cursor-pointer shadow-lg shadow-rose-900/40"
+                    title="Confirm deletion of this expense"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirm Delete?</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(true)}
+                    className="px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 hover:border-rose-500/40 border border-slate-700 text-slate-400 hover:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Delete this expense"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Expense</span>
+                  </button>
+                )
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                <span>{editingExpense ? 'Save Changes' : 'Record Bill / Expense'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

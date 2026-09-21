@@ -29,7 +29,7 @@ export function DatabaseResetModal({
   onDatabaseReset,
   onFactoryReset,
 }: DatabaseResetModalProps) {
-  const [resetType, setResetType] = useState<'standard' | 'blank' | 'factory'>('standard');
+  const [resetType, setResetType] = useState<'standard' | 'expenses_only' | 'blank' | 'demo' | 'factory'>('standard');
   const [confirmWord, setConfirmWord] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -56,17 +56,31 @@ export function DatabaseResetModal({
             window.location.reload();
           }
         }, 800);
+      } else if (resetType === 'expenses_only') {
+        const freshDb = UserDatabaseService.clearUserExpenses(currentUser.id);
+        onDatabaseReset(freshDb);
+        setFeedback({ 
+          type: 'success', 
+          message: 'All daily expenses and pending swipes have been purged! Accounts remain intact.' 
+        });
+        setTimeout(() => {
+          setIsProcessing(false);
+          setConfirmWord('');
+          onClose();
+        }, 1000);
       } else {
         const freshDb = UserDatabaseService.resetUserDatabase(
           currentUser.id,
-          resetType === 'blank' ? 'blank' : 'standard'
+          resetType === 'blank' ? 'blank' : resetType === 'demo' ? 'demo' : 'standard'
         );
         onDatabaseReset(freshDb);
         setFeedback({ 
           type: 'success', 
           message: resetType === 'blank' 
             ? 'Database reset to a pristine blank slate!' 
-            : 'Database refreshed with clean starter accounts & templates!' 
+            : resetType === 'demo'
+            ? 'Database populated with demo accounts & sample transactions!'
+            : 'Database refreshed to a clean restart: 0 debt balances and 0 pending swipes!' 
         });
         setTimeout(() => {
           setIsProcessing(false);
@@ -129,7 +143,7 @@ export function DatabaseResetModal({
             </label>
 
             <div className="space-y-2">
-              {/* Standard Starter */}
+              {/* Clean Standard Starter */}
               <label 
                 className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
                   resetType === 'standard'
@@ -148,10 +162,37 @@ export function DatabaseResetModal({
                 <div className="space-y-1">
                   <div className="text-xs font-bold flex items-center gap-1.5 text-indigo-300">
                     <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Default Starter Preset (Recommended)</span>
+                    <span>Clean Fresh Restart (0 Debt & 0 Swipes - Recommended)</span>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Restores 3 optimized accounts (Cards & Loans), 6 sample recurring bills (TNB, Unifi, Water), standard Quick Pay templates, and resets payment calendars.
+                    Restores clean starter cards and bank account with RM 0 debt balance, 0 logged expenses, and 0 pending swipes awaiting settlement.
+                  </p>
+                </div>
+              </label>
+
+              {/* Wipe Expenses & Swipes Only */}
+              <label 
+                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  resetType === 'expenses_only'
+                    ? 'bg-emerald-950/40 border-emerald-500 text-white'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="resetType"
+                  value="expenses_only"
+                  checked={resetType === 'expenses_only'}
+                  onChange={() => setResetType('expenses_only')}
+                  className="mt-1 accent-emerald-500"
+                />
+                <div className="space-y-1">
+                  <div className="text-xs font-bold flex items-center gap-1.5 text-emerald-300">
+                    <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Purge Only Daily Expenses & Recent Swipes</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Keeps your linked cards, bank accounts, and standing instructions untouched, but wipes all logged daily expenses and pending swipes awaiting settlement.
                   </p>
                 </div>
               </label>
@@ -179,6 +220,33 @@ export function DatabaseResetModal({
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
                     Wipes all accounts, expenses, installments, and standing instructions to 0. Keeps your user profile and settings intact so you can enter your real data from scratch.
+                  </p>
+                </div>
+              </label>
+
+              {/* Demo Starter with Sample Transactions */}
+              <label 
+                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  resetType === 'demo'
+                    ? 'bg-blue-950/40 border-blue-500 text-white'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="resetType"
+                  value="demo"
+                  checked={resetType === 'demo'}
+                  onChange={() => setResetType('demo')}
+                  className="mt-1 accent-blue-500"
+                />
+                <div className="space-y-1">
+                  <div className="text-xs font-bold flex items-center gap-1.5 text-blue-300">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Demo Mode (With Sample Transactions & Swipes)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Populates accounts with 6 sample expenses, recurring bills, and 2 active installment plans for testing and demonstration purposes.
                   </p>
                 </div>
               </label>

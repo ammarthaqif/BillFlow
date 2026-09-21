@@ -84,7 +84,10 @@ import {
   Edit3,
   Layers,
   Sun,
-  RotateCcw
+  RotateCcw,
+  BarChart3,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 export default function App() {
@@ -110,7 +113,8 @@ export default function App() {
   const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
   // Active view tab (default to 'today' for daily engagement & zero friction)
-  const [activeTab, setActiveTab] = useState<'today' | 'strategy' | 'expenses' | 'accounts' | 'optimizer' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'standing_instructions'>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'overview' | 'strategy' | 'expenses' | 'accounts' | 'optimizer' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'standing_instructions'>('today');
+  const [isOverviewExpandedOnToday, setIsOverviewExpandedOnToday] = useState(false);
   // Accounts sub-tab: 'cards' or 'standing_instructions'
   const [accountsSubTab, setAccountsSubTab] = useState<'cards' | 'standing_instructions'>('cards');
 
@@ -138,6 +142,7 @@ export default function App() {
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState<string>('');
   const [isIncomeSettingsOpen, setIsIncomeSettingsOpen] = useState(false);
+  const [incomeSettingsInitialTab, setIncomeSettingsInitialTab] = useState<'salary' | 'csv' | 'backup'>('salary');
   const [isBankAdvisorOpen, setIsBankAdvisorOpen] = useState(false);
   const [advisorTargetAccountId, setAdvisorTargetAccountId] = useState<string | undefined>(undefined);
 
@@ -1287,6 +1292,14 @@ export default function App() {
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
   };
 
+  // Purge all pending/unsettled swipes awaiting settlement
+  const handleClearUnsettledSwipes = () => {
+    const nextExpenses = expenses.filter((e) => e.status !== 'unsettled');
+    setExpenses(nextExpenses);
+    triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
+    setAutoSaveStatus('Pending swipes cleared');
+  };
+
   // Mark single alert as read
   const handleMarkAlertRead = (id: string) => {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
@@ -1318,6 +1331,10 @@ export default function App() {
         onOpenConnectBank={() => setIsConnectBankOpen(true)}
         onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
         onOpenFamilySync={() => setIsFamilySyncOpen(true)}
+        onOpenSettings={(tab) => {
+          setIncomeSettingsInitialTab(tab || 'salary');
+          setIsIncomeSettingsOpen(true);
+        }}
         onOpenBankAdvisor={() => {
           setAdvisorTargetAccountId(undefined);
           setIsBankAdvisorOpen(true);
@@ -1412,123 +1429,224 @@ export default function App() {
       </div>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
-        {/* Executive Summary Metrics & Utilization */}
-        <ExecutiveOverview
-          accounts={accounts}
-          installments={installments}
-          settings={settings}
-          expenses={expenses}
-          onOpenIncomeSettings={() => setIsIncomeSettingsOpen(true)}
-          onOpenBankAdvisor={(accId) => {
-            setAdvisorTargetAccountId(accId);
-            setIsBankAdvisorOpen(true);
-          }}
-          onUpdateSpendingCap={(newCap) => {
-            const updated = { ...settings, monthlySpendingCap: newCap };
-            handleSaveIncomeSettings(updated);
-          }}
-        />
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-4 space-y-4 sm:space-y-6">
+        {/* Top Sticky Navigation Tabs Bar */}
+        <div className="sticky top-16 z-20 bg-slate-950/95 backdrop-blur-md py-2.5 sm:py-3 border-b border-slate-800/80 -mx-3 px-3 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none text-xs font-semibold">
+            {/* Tab: Today */}
+            <button
+              id="tab-today-hub"
+              onClick={() => setActiveTab('today')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'today'
+                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
+              }`}
+            >
+              <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Today's Command Hub</span>
+            </button>
 
-        {/* Streamlined View Navigation Tabs */}
-        <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-800 pb-2 text-xs font-semibold scrollbar-none">
-          <button
-            id="tab-today-hub"
-            onClick={() => setActiveTab('today')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'today'
-                ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Sun className="w-4 h-4 text-amber-400" />
-            <span>Today's Command Hub</span>
-          </button>
+            {/* Tab: Executive Overview */}
+            <button
+              id="tab-overview"
+              onClick={() => setActiveTab('overview')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'overview'
+                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Executive Overview</span>
+            </button>
 
-          <button
-            id="tab-strategy-hub"
-            onClick={() => setActiveTab('strategy')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Sliders className="w-4 h-4 text-indigo-400" />
-            <span>Strategy & Cash Flow</span>
-          </button>
+            {/* Tab: Strategy & Cash Flow */}
+            <button
+              id="tab-strategy-hub"
+              onClick={() => setActiveTab('strategy')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments' || activeTab === 'rewards_balancer'
+                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
+              }`}
+            >
+              <Sliders className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span>Strategy & Cash Flow</span>
+            </button>
 
-          <button
-            id="tab-expenses"
-            onClick={() => setActiveTab('expenses')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'expenses'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Receipt className="w-4 h-4 text-emerald-400" />
-            <span>Daily Expenses ({expenses.length})</span>
-          </button>
+            {/* Tab: Daily Expenses */}
+            <button
+              id="tab-expenses"
+              onClick={() => setActiveTab('expenses')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'expenses'
+                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
+              }`}
+            >
+              <Receipt className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Daily Expenses</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                activeTab === 'expenses' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
+              }`}>
+                {expenses.length}
+              </span>
+            </button>
 
-          <button
-            id="tab-accounts"
-            onClick={() => setActiveTab('accounts')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'accounts' || activeTab === 'standing_instructions'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Building2 className="w-4 h-4 text-sky-400" />
-            <span>Accounts & Automations ({accounts.length})</span>
-          </button>
+            {/* Tab: Accounts & Automations */}
+            <button
+              id="tab-accounts"
+              onClick={() => setActiveTab('accounts')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'accounts' || activeTab === 'standing_instructions'
+                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
+              }`}
+            >
+              <Building2 className="w-4 h-4 text-sky-400 shrink-0" />
+              <span>Accounts & Automations</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                activeTab === 'accounts' || activeTab === 'standing_instructions' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
+              }`}>
+                {accounts.length}
+              </span>
+            </button>
+          </div>
         </div>
 
-        {/* Tab 1: Today's Daily Command Center */}
-        {activeTab === 'today' && (
-          <DailyHub
+        {/* Tab: Executive Overview Full Page */}
+        {activeTab === 'overview' && (
+          <ExecutiveOverview
             accounts={accounts}
             installments={installments}
-            schedule={schedule}
-            expenses={expenses}
-            standingInstructions={standingInstructions}
             settings={settings}
-            currency={settings.currency || 'MYR'}
-            quickPayTemplates={quickPayTemplates}
-            onSelectQuickPayForPay={(tpl) => {
-              setSelectedQuickPayTemplate(tpl);
-              setIsQuickPayExecuteOpen(true);
-            }}
-            onOpenManageQuickPay={() => setIsQuickPayManageOpen(true)}
-            onOpenCreateQuickPay={() => setIsQuickPayManageOpen(true)}
-            onQuickLogExpense={handleQuickLogExpense}
-            onOpenReceiptCapture={() => setIsReceiptCaptureOpen(true)}
-            onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
+            expenses={expenses}
+            onOpenIncomeSettings={() => setIsIncomeSettingsOpen(true)}
             onOpenBankAdvisor={(accId) => {
               setAdvisorTargetAccountId(accId);
               setIsBankAdvisorOpen(true);
             }}
-            onOpenUniversalQuickAdd={(tab) => {
-              setUniversalQuickAddInitialTab(tab || 'expense');
-              setIsUniversalQuickAddOpen(true);
-            }}
-            onToggleScheduleStatus={(billId) => {
-              if (!paidScheduleIds.has(billId)) {
-                const nextPaid = new Set(paidScheduleIds);
-                const nextScheduled = new Set(scheduledScheduleIds);
-                nextScheduled.delete(billId);
-                nextPaid.add(billId);
-                setPaidScheduleIds(nextPaid);
-                setScheduledScheduleIds(nextScheduled);
-                triggerAutoSave(accounts, installments, settings, nextPaid, nextScheduled);
-              }
-            }}
-            onImmediateSettleExpense={handleImmediateSettleExpense}
-            onSwitchTab={(tab) => {
-              setActiveTab(tab);
+            onUpdateSpendingCap={(newCap) => {
+              const updated = { ...settings, monthlySpendingCap: newCap };
+              handleSaveIncomeSettings(updated);
             }}
           />
+        )}
+
+        {/* Tab: Today's Daily Command Center */}
+        {activeTab === 'today' && (
+          <div className="space-y-5">
+            {/* Quick Macro Ribbon on Today */}
+            <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs">
+                <div>
+                  <span className="text-slate-400 text-[10px] block">Allocated Cash Buffer</span>
+                  <span className="font-mono font-bold text-white text-sm">
+                    {formatCurrency(settings.allocatedCashForBills, settings.currency || 'MYR')}
+                  </span>
+                </div>
+                <div className="h-6 w-px bg-slate-800 hidden sm:block" />
+                <div>
+                  <span className="text-slate-400 text-[10px] block">Monthly Spending Cap</span>
+                  <span className="font-mono font-bold text-white text-sm">
+                    {formatCurrency(settings.monthlySpendingCap || 4000, settings.currency || 'MYR')}
+                  </span>
+                </div>
+                <div className="h-6 w-px bg-slate-800 hidden sm:block" />
+                <div>
+                  <span className="text-slate-400 text-[10px] block">Active Accounts</span>
+                  <span className="font-mono font-bold text-indigo-300 text-sm">
+                    {accounts.length} linked
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsOverviewExpandedOnToday(!isOverviewExpandedOnToday)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{isOverviewExpandedOnToday ? 'Hide Macro Overview' : 'Expand Macro Overview'}</span>
+                  {isOverviewExpandedOnToday ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('overview')}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <span>Full Overview Tab</span>
+                  <ArrowRightLeft className="w-3 h-3 text-indigo-400" />
+                </button>
+              </div>
+            </div>
+
+            {/* Conditionally Expanded Full Executive Overview on Today View */}
+            {isOverviewExpandedOnToday && (
+              <ExecutiveOverview
+                accounts={accounts}
+                installments={installments}
+                settings={settings}
+                expenses={expenses}
+                onOpenIncomeSettings={() => setIsIncomeSettingsOpen(true)}
+                onOpenBankAdvisor={(accId) => {
+                  setAdvisorTargetAccountId(accId);
+                  setIsBankAdvisorOpen(true);
+                }}
+                onUpdateSpendingCap={(newCap) => {
+                  const updated = { ...settings, monthlySpendingCap: newCap };
+                  handleSaveIncomeSettings(updated);
+                }}
+              />
+            )}
+
+            <DailyHub
+              accounts={accounts}
+              installments={installments}
+              schedule={schedule}
+              expenses={expenses}
+              standingInstructions={standingInstructions}
+              settings={settings}
+              currency={settings.currency || 'MYR'}
+              quickPayTemplates={quickPayTemplates}
+              onSelectQuickPayForPay={(tpl) => {
+                setSelectedQuickPayTemplate(tpl);
+                setIsQuickPayExecuteOpen(true);
+              }}
+              onOpenManageQuickPay={() => setIsQuickPayManageOpen(true)}
+              onOpenCreateQuickPay={() => setIsQuickPayManageOpen(true)}
+              onQuickLogExpense={handleQuickLogExpense}
+              onOpenReceiptCapture={() => setIsReceiptCaptureOpen(true)}
+              onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
+              onOpenBankAdvisor={(accId) => {
+                setAdvisorTargetAccountId(accId);
+                setIsBankAdvisorOpen(true);
+              }}
+              onOpenUniversalQuickAdd={(tab) => {
+                setUniversalQuickAddInitialTab(tab || 'expense');
+                setIsUniversalQuickAddOpen(true);
+              }}
+              onToggleScheduleStatus={(billId) => {
+                if (!paidScheduleIds.has(billId)) {
+                  const nextPaid = new Set(paidScheduleIds);
+                  const nextScheduled = new Set(scheduledScheduleIds);
+                  nextScheduled.delete(billId);
+                  nextPaid.add(billId);
+                  setPaidScheduleIds(nextPaid);
+                  setScheduledScheduleIds(nextScheduled);
+                  triggerAutoSave(accounts, installments, settings, nextPaid, nextScheduled);
+                }
+              }}
+              onImmediateSettleExpense={handleImmediateSettleExpense}
+              onBatchSettleUnsettled={handleBatchSettleUnsettled}
+              onClearUnsettledSwipes={handleClearUnsettledSwipes}
+              onSwitchTab={(tab) => {
+                setActiveTab(tab);
+              }}
+              onDeleteExpense={handleDeleteExpense}
+            />
+          </div>
         )}
 
         {/* Tab 2: Strategy & Cash Flow Hub (Sequencer, Float Calendar, Installments, Rewards Balancer) */}
@@ -1762,6 +1880,15 @@ export default function App() {
                   );
                 }
 
+                const isShared = !!(acc.isSharedLimit && acc.sharedLimitGroupId);
+                const siblingCards = isShared ? accounts.filter((a) => a.sharedLimitGroupId === acc.sharedLimitGroupId) : [acc];
+                const pooledLimit = isShared ? (acc.sharedCreditLimit || acc.creditLimit) : acc.creditLimit;
+                const pooledTotalBalance = siblingCards.reduce((sum, c) => sum + (c.totalBalance || 0), 0);
+                const pooledUtilRatio = Math.round((pooledTotalBalance / (pooledLimit || 1)) * 100);
+                const activeUtilRatio = isShared ? pooledUtilRatio : utilRatio;
+
+                const displayDueDay = acc.dueDay || (acc.dueDate ? parseInt(acc.dueDate.split('-')[2] || '0', 10) : null);
+
                 return (
                   <div
                     key={acc.id}
@@ -1787,6 +1914,12 @@ export default function App() {
                             >
                               {getAccountTypeLabel(acc.type)}
                             </span>
+                            {isShared && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center gap-1">
+                                <Layers className="w-2.5 h-2.5" />
+                                <span>Shared Limit</span>
+                              </span>
+                            )}
                             {acc.ownerName && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-slate-800 border border-slate-700 text-slate-300">
                                 {acc.ownerName}
@@ -1818,9 +1951,28 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Shared limit pooled summary if applicable */}
+                    {isShared && (
+                      <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/20 text-[11px] text-amber-200/90 space-y-1">
+                        <div className="flex items-center justify-between font-semibold">
+                          <span className="flex items-center gap-1 text-amber-300">
+                            <Layers className="w-3 h-3" />
+                            <span>{acc.sharedLimitGroupName || 'Shared Credit Limit'}</span>
+                          </span>
+                          <span className="text-amber-400 font-mono font-bold">
+                            {formatCurrency(pooledLimit, settings.currency)} Combined
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span>Pooled Across: {siblingCards.map((c) => c.name.replace(/Maybank 2 Cards \((.*?)\)/, '$1')).join(' + ')}</span>
+                          <span>{formatCurrency(Math.max(0, pooledLimit - pooledTotalBalance), settings.currency)} Available</span>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-700/50">
                       <div>
-                        <span className="text-[11px] text-slate-400">Total Balance</span>
+                        <span className="text-[11px] text-slate-400">Card Balance</span>
                         <div className="font-bold text-white">{formatCurrency(acc.totalBalance, settings.currency)}</div>
                       </div>
                       <div>
@@ -1828,16 +1980,18 @@ export default function App() {
                         <div className="font-bold text-amber-400">{formatCurrency(acc.statementBalance, settings.currency)}</div>
                       </div>
                       <div>
-                        <span className="text-[11px] text-slate-400">Cycle Cutoff</span>
-                        <div className="font-medium text-slate-200">Day {acc.cycleDay} of month</div>
+                        <span className="text-[11px] text-slate-400">Statement Issued</span>
+                        <div className="font-medium text-indigo-300">Day {acc.cycleDay} of month</div>
+                      </div>
+                      <div>
+                        <span className="text-[11px] text-slate-400">Settlement Due</span>
+                        <div className="font-medium text-amber-300">
+                          Day {displayDueDay || 'N/A'} {acc.dueDate ? `(${acc.dueDate})` : ''}
+                        </div>
                       </div>
                       <div>
                         <span className="text-[11px] text-slate-400">Grace Float</span>
-                        <div className="font-medium text-emerald-400">{acc.gracePeriodDays} Days</div>
-                      </div>
-                      <div>
-                        <span className="text-[11px] text-slate-400">APR Rate</span>
-                        <div className="font-medium text-slate-200">{acc.apr}%</div>
+                        <div className="font-medium text-emerald-400">{acc.gracePeriodDays} Days 0% Float</div>
                       </div>
                       <div>
                         <span className="text-[11px] text-slate-400">Unsettled Swipes</span>
@@ -1850,15 +2004,18 @@ export default function App() {
                     {/* Utilization mini-bar */}
                     <div className="space-y-1 pt-1">
                       <div className="flex items-center justify-between text-[10px] text-slate-400">
-                        <span>Limit: {formatCurrency(acc.creditLimit, settings.currency)}</span>
-                        <span className={utilRatio > 50 ? 'text-rose-400 font-bold' : 'text-slate-300'}>
-                          {utilRatio}% used
+                        <span>
+                          {isShared ? 'Pooled Limit: ' : 'Limit: '}
+                          {formatCurrency(isShared ? pooledLimit : acc.creditLimit, settings.currency)}
+                        </span>
+                        <span className={activeUtilRatio > 50 ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+                          {activeUtilRatio}% used {isShared ? '(pooled)' : ''}
                         </span>
                       </div>
                       <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full ${
-                            utilRatio > 50 ? 'bg-rose-500' : utilRatio > 30 ? 'bg-amber-500' : 'bg-emerald-500'
+                            activeUtilRatio > 50 ? 'bg-rose-500' : activeUtilRatio > 30 ? 'bg-amber-500' : 'bg-emerald-500'
                           }`}
                           style={{ width: `${Math.min(100, utilRatio)}%` }}
                         />
@@ -2048,7 +2205,12 @@ export default function App() {
         settings={settings}
         accounts={accounts}
         bankAccounts={accounts.filter((a) => a.type === 'bank_account')}
+        expenses={expenses}
+        currentUser={currentUser || undefined}
+        currentDb={userDb || undefined}
+        initialTab={incomeSettingsInitialTab}
         onSaveSettings={handleSaveIncomeSettings}
+        onDatabaseRestored={handleDatabaseUpdated}
       />
 
       {/* Bank Settlement Advisor & Scheduler Modal */}
@@ -2120,7 +2282,9 @@ export default function App() {
           setSelectedAccountForEdit(null);
         }}
         account={selectedAccountForEdit}
+        allAccounts={accounts}
         currency={settings.currency || 'MYR'}
+        onUpdateAccount={handleUpdateAccount}
         onSave={handleUpdateAccount}
         onDelete={handleDeleteAccount}
       />
@@ -2138,6 +2302,7 @@ export default function App() {
         expenses={expenses}
         currency={settings.currency || 'MYR'}
         initialAccountId={standaloneExpenseInitialAccount}
+        onDeleteExpense={handleDeleteExpense}
         onSaveExpense={(data, immediateSettle, installmentSplit) => {
           if (standaloneEditingExpense && standaloneEditingExpense.id) {
             handleUpdateExpense({
@@ -2187,32 +2352,36 @@ export default function App() {
       />
 
       {/* Quick Pay Execution Modal (1-Click instant settlement) */}
-      <QuickPayExecuteModal
-        isOpen={isQuickPayExecuteOpen}
-        onClose={() => {
-          setIsQuickPayExecuteOpen(false);
-          setSelectedQuickPayTemplate(null);
-        }}
-        template={selectedQuickPayTemplate}
-        accounts={accounts}
-        currency={settings.currency || 'MYR'}
-        onExecuteSettlement={handleExecuteQuickPaySettlement}
-      />
+      {isQuickPayExecuteOpen && selectedQuickPayTemplate && (
+        <QuickPayExecuteModal
+          isOpen={isQuickPayExecuteOpen}
+          onClose={() => {
+            setIsQuickPayExecuteOpen(false);
+            setSelectedQuickPayTemplate(null);
+          }}
+          template={selectedQuickPayTemplate}
+          accounts={accounts}
+          currency={settings.currency || 'MYR'}
+          onExecuteSettlement={handleExecuteQuickPaySettlement}
+        />
+      )}
 
       {/* Quick Pay Templates Management Modal */}
-      <QuickPayManageModal
-        isOpen={isQuickPayManageOpen}
-        onClose={() => setIsQuickPayManageOpen(false)}
-        templates={quickPayTemplates}
-        accounts={accounts}
-        currency={settings.currency || 'MYR'}
-        onSaveTemplate={handleSaveQuickPayTemplate}
-        onDeleteTemplate={handleDeleteQuickPayTemplate}
-        onSelectForPay={(tpl) => {
-          setSelectedQuickPayTemplate(tpl);
-          setIsQuickPayExecuteOpen(true);
-        }}
-      />
+      {isQuickPayManageOpen && (
+        <QuickPayManageModal
+          isOpen={isQuickPayManageOpen}
+          onClose={() => setIsQuickPayManageOpen(false)}
+          templates={quickPayTemplates}
+          accounts={accounts}
+          currency={settings.currency || 'MYR'}
+          onSaveTemplate={handleSaveQuickPayTemplate}
+          onDeleteTemplate={handleDeleteQuickPayTemplate}
+          onSelectForPay={(tpl) => {
+            setSelectedQuickPayTemplate(tpl);
+            setIsQuickPayExecuteOpen(true);
+          }}
+        />
+      )}
 
       {/* Database Fresh Restart Modal */}
       {currentUser && (

@@ -330,7 +330,6 @@ export const AccountTransactionsModal: React.FC<AccountTransactionsModalProps> =
             </div>
           ) : (
             filteredList.map((expense) => {
-              const CategoryIcon = getExpenseCategoryIcon(expense.category);
               const isSplit = expense.repaymentStructure === 'split_months' || (expense.splitMonths && expense.splitMonths > 1);
 
               return (
@@ -339,8 +338,8 @@ export const AccountTransactionsModal: React.FC<AccountTransactionsModalProps> =
                   className="p-3.5 rounded-2xl border border-slate-800 bg-slate-950/70 hover:border-slate-700/90 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-300 shrink-0">
-                      <CategoryIcon className="w-4 h-4 text-indigo-400" />
+                    <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-indigo-400 shrink-0">
+                      {getExpenseCategoryIcon(expense.category, 'w-4 h-4 text-indigo-400')}
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">

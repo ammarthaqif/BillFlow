@@ -8,7 +8,8 @@ import {
   ArrowRightLeft,
   LogOut,
   Landmark,
-  RotateCcw
+  RotateCcw,
+  SlidersHorizontal
 } from 'lucide-react';
 import { CustomAlert, UserProfile } from '../types';
 import { CurrencyCode } from '../utils/currency';
@@ -24,6 +25,7 @@ interface NavbarProps {
   onOpenAIAdvisor: () => void;
   onOpenFamilySync: () => void;
   onOpenBankAdvisor?: () => void;
+  onOpenSettings?: (tab?: 'salary' | 'csv' | 'backup') => void;
   onRecordExpense?: () => void;
   onOpenQuickAdd?: (tab?: 'expense' | 'bank_balance' | 'account' | 'recurring') => void;
   onOpenResetDatabase?: () => void;
@@ -43,6 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAIAdvisor,
   onOpenFamilySync,
   onOpenBankAdvisor,
+  onOpenSettings,
   onRecordExpense,
   onOpenQuickAdd,
   onOpenResetDatabase,
@@ -68,7 +71,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-lg tracking-tight text-white">BillFlow</span>
-                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <span className="hidden md:inline-flex text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                   Float Optimizer
                 </span>
               </div>
@@ -85,6 +88,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Actions & Status */}
           <div className="flex items-center gap-1.5 sm:gap-2.5">
+            {/* Settings & Data Management Button */}
+            {onOpenSettings && (
+              <button
+                id="btn-open-settings"
+                onClick={() => onOpenSettings('salary')}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/90 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 transition-all cursor-pointer shadow-sm hover:border-indigo-500/40"
+                title="Settings & Data: Income, CSV Export, Database Backup & Restore"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden sm:inline">Settings</span>
+              </button>
+            )}
+
             {/* Family Sync Button */}
             <button
               id="btn-open-family-sync"
@@ -134,7 +150,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Quick Add: Log expense, update bank balance, or link accounts"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Quick Add</span>
+              <span><span className="hidden sm:inline">Quick </span>Add</span>
             </button>
 
             {/* Notification Bell */}

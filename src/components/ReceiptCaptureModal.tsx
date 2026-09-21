@@ -97,7 +97,6 @@ export function ReceiptCaptureModal({
   onUsageIncremented,
   onUpgradeToPro,
 }: ReceiptCaptureModalProps) {
-  if (isOpen === false) return null;
   const currentCurrency = activeCurrency || currency || 'MYR';
 
   // Navigation Steps: 1: Capture/Upload -> 2: Review Extraction -> 3: Prompt Payment & Scheme
@@ -350,6 +349,8 @@ export function ReceiptCaptureModal({
   };
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+
+  if (isOpen === false) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
