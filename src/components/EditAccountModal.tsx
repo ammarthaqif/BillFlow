@@ -50,9 +50,9 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   const [creditLimit, setCreditLimit] = useState<number>(0);
   const [apr, setApr] = useState<number>(0);
   const [lateFee, setLateFee] = useState<number>(0);
-  const [cycleDay, setCycleDay] = useState<number>(18);
-  const [dueDay, setDueDay] = useState<number>(8);
-  const [gracePeriodDays, setGracePeriodDays] = useState<number>(20);
+  const [cycleDayInput, setCycleDayInput] = useState<string>('18');
+  const [dueDayInput, setDueDayInput] = useState<string>('8');
+  const [gracePeriodDaysInput, setGracePeriodDaysInput] = useState<string>('20');
   const [dueDate, setDueDate] = useState('');
   const [minPayment, setMinPayment] = useState<number>(0);
   const [color, setColor] = useState('#4f46e5');
@@ -107,7 +107,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       setLateFee(account.lateFee || 0);
       
       const cDay = account.cycleDay || 18;
-      setCycleDay(cDay);
+      setCycleDayInput(String(cDay));
 
       // Determine due day
       let initialDueDay = account.dueDay;
@@ -120,8 +120,9 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       if (!initialDueDay) {
         initialDueDay = Math.min(31, ((cDay + (account.gracePeriodDays || 20) - 1) % 30) + 1);
       }
-      setDueDay(initialDueDay);
-      setGracePeriodDays(account.gracePeriodDays || computeGraceFloat(cDay, initialDueDay));
+      setDueDayInput(String(initialDueDay));
+      const initialGrace = account.gracePeriodDays || computeGraceFloat(cDay, initialDueDay);
+      setGracePeriodDaysInput(String(initialGrace));
       setDueDate(account.dueDate || calculateNextDueDate(initialDueDay));
 
       setMinPayment(account.minPayment || 0);
@@ -160,20 +161,53 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   );
 
   // When user updates cycleDay (statement issue day)
-  const handleCycleDayChange = (newVal: number) => {
-    const safeCycle = Math.min(31, Math.max(1, newVal));
-    setCycleDay(safeCycle);
-    const float = computeGraceFloat(safeCycle, dueDay);
-    setGracePeriodDays(float);
+  const handleCycleDayChange = (raw: string) => {
+    setCycleDayInput(raw);
+    if (raw.trim() === '') return;
+    const c = parseInt(raw, 10);
+    if (!isNaN(c) && c >= 1 && c <= 31) {
+      const d = parseInt(dueDayInput, 10);
+      if (!isNaN(d) && d >= 1 && d <= 31) {
+        const float = computeGraceFloat(c, d);
+        setGracePeriodDaysInput(String(float));
+      }
+    }
+  };
+
+  const handleCycleDayBlur = () => {
+    let c = parseInt(cycleDayInput, 10);
+    if (isNaN(c) || c < 1) c = 1;
+    if (c > 31) c = 31;
+    setCycleDayInput(String(c));
+    const d = parseInt(dueDayInput, 10) || 8;
+    const float = computeGraceFloat(c, d);
+    setGracePeriodDaysInput(String(float));
   };
 
   // When user updates dueDay (settlement due day)
-  const handleDueDayChange = (newVal: number) => {
-    const safeDue = Math.min(31, Math.max(1, newVal));
-    setDueDay(safeDue);
-    const float = computeGraceFloat(cycleDay, safeDue);
-    setGracePeriodDays(float);
-    setDueDate(calculateNextDueDate(safeDue));
+  const handleDueDayChange = (raw: string) => {
+    setDueDayInput(raw);
+    if (raw.trim() === '') return;
+    const d = parseInt(raw, 10);
+    if (!isNaN(d) && d >= 1 && d <= 31) {
+      const c = parseInt(cycleDayInput, 10);
+      if (!isNaN(c) && c >= 1 && c <= 31) {
+        const float = computeGraceFloat(c, d);
+        setGracePeriodDaysInput(String(float));
+      }
+      setDueDate(calculateNextDueDate(d));
+    }
+  };
+
+  const handleDueDayBlur = () => {
+    let d = parseInt(dueDayInput, 10);
+    if (isNaN(d) || d < 1) d = 1;
+    if (d > 31) d = 31;
+    setDueDayInput(String(d));
+    const c = parseInt(cycleDayInput, 10) || 18;
+    const float = computeGraceFloat(c, d);
+    setGracePeriodDaysInput(String(float));
+    setDueDate(calculateNextDueDate(d));
   };
 
   // When user updates dueDate directly
@@ -183,18 +217,34 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
     if (parts.length === 3) {
       const day = parseInt(parts[2], 10);
       if (!isNaN(day) && day >= 1 && day <= 31) {
-        setDueDay(day);
-        setGracePeriodDays(computeGraceFloat(cycleDay, day));
+        setDueDayInput(String(day));
+        const c = parseInt(cycleDayInput, 10) || 18;
+        setGracePeriodDaysInput(String(computeGraceFloat(c, day)));
       }
     }
   };
 
   // When user updates gracePeriodDays directly
-  const handleGraceDaysChange = (newGrace: number) => {
-    const safeGrace = Math.max(1, Math.min(60, newGrace));
-    setGracePeriodDays(safeGrace);
-    const calculatedDue = ((cycleDay + safeGrace - 1) % 30) + 1;
-    setDueDay(calculatedDue);
+  const handleGraceDaysChange = (raw: string) => {
+    setGracePeriodDaysInput(raw);
+    if (raw.trim() === '') return;
+    const g = parseInt(raw, 10);
+    if (!isNaN(g) && g >= 1 && g <= 60) {
+      const c = parseInt(cycleDayInput, 10) || 18;
+      const calculatedDue = ((c + g - 1) % 30) + 1;
+      setDueDayInput(String(calculatedDue));
+      setDueDate(calculateNextDueDate(calculatedDue));
+    }
+  };
+
+  const handleGraceDaysBlur = () => {
+    let g = parseInt(gracePeriodDaysInput, 10);
+    if (isNaN(g) || g < 1) g = 20;
+    if (g > 60) g = 60;
+    setGracePeriodDaysInput(String(g));
+    const c = parseInt(cycleDayInput, 10) || 18;
+    const calculatedDue = ((c + g - 1) % 30) + 1;
+    setDueDayInput(String(calculatedDue));
     setDueDate(calculateNextDueDate(calculatedDue));
   };
 
@@ -235,9 +285,9 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       creditLimit: Math.max(0, Number(effectiveLimit) || 0),
       apr: Math.max(0, Number(apr) || 0),
       lateFee: Math.max(0, Number(lateFee) || 0),
-      cycleDay: Math.min(31, Math.max(1, Number(cycleDay) || 1)),
-      dueDay: Math.min(31, Math.max(1, Number(dueDay) || 1)),
-      gracePeriodDays: Math.max(0, Number(gracePeriodDays) || 0),
+      cycleDay: Math.min(31, Math.max(1, parseInt(cycleDayInput, 10) || 1)),
+      dueDay: Math.min(31, Math.max(1, parseInt(dueDayInput, 10) || 1)),
+      gracePeriodDays: Math.max(0, parseInt(gracePeriodDaysInput, 10) || 0),
       dueDate: dueDate || account.dueDate,
       minPayment: Math.max(0, Number(minPayment) || 0),
       color: color || account.color,
@@ -582,8 +632,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       type="number"
                       min="1"
                       max="31"
-                      value={cycleDay}
-                      onChange={(e) => handleCycleDayChange(parseInt(e.target.value) || 1)}
+                      value={cycleDayInput}
+                      onChange={(e) => handleCycleDayChange(e.target.value)}
+                      onBlur={handleCycleDayBlur}
+                      placeholder="18"
                       className="w-full bg-slate-900 border border-indigo-500/50 rounded-xl px-3 py-2 text-indigo-300 font-mono font-bold focus:outline-none focus:border-indigo-400"
                     />
                     <span className="absolute right-3 top-2 text-slate-400 text-[11px]">th of month</span>
@@ -603,8 +655,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       type="number"
                       min="1"
                       max="31"
-                      value={dueDay}
-                      onChange={(e) => handleDueDayChange(parseInt(e.target.value) || 1)}
+                      value={dueDayInput}
+                      onChange={(e) => handleDueDayChange(e.target.value)}
+                      onBlur={handleDueDayBlur}
+                      placeholder="8"
                       className="w-full bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-400"
                     />
                     <span className="absolute right-3 top-2 text-slate-400 text-[11px]">th of month</span>
@@ -624,8 +678,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       type="number"
                       min="1"
                       max="60"
-                      value={gracePeriodDays}
-                      onChange={(e) => handleGraceDaysChange(parseInt(e.target.value) || 1)}
+                      value={gracePeriodDaysInput}
+                      onChange={(e) => handleGraceDaysChange(e.target.value)}
+                      onBlur={handleGraceDaysBlur}
+                      placeholder="20"
                       className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl px-3 py-2 text-emerald-300 font-mono font-bold focus:outline-none focus:border-emerald-400"
                     />
                     <span className="absolute right-3 top-2 text-slate-400 text-[11px]">days</span>
@@ -689,7 +745,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                   <div>
                     <span className="text-slate-400 text-[11px] block">Billing Cycle Flow</span>
                     <span className="font-semibold text-white">
-                      Statement Issued: <strong>Day {cycleDay}</strong>
+                      Statement Issued: <strong>Day {cycleDayInput || '—'}</strong>
                     </span>
                   </div>
                 </div>
@@ -699,7 +755,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                 <div className="text-right">
                   <span className="text-slate-400 text-[11px] block">Settlement Deadline</span>
                   <span className="font-semibold text-amber-400">
-                    Day {dueDay} • Next {dueDate}
+                    Day {dueDayInput || '—'} • Next {dueDate}
                   </span>
                 </div>
               </div>

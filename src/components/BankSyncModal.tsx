@@ -347,8 +347,12 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   min="1"
                   max="31"
                   required
-                  value={cycleDay ?? 1}
-                  onChange={(e) => setCycleDay(Number(e.target.value))}
+                  value={cycleDay || ''}
+                  onChange={(e) => setCycleDay(e.target.value === '' ? ('' as unknown as number) : Number(e.target.value))}
+                  onBlur={() => {
+                    if (!cycleDay || cycleDay < 1) setCycleDay(15);
+                    else if (cycleDay > 31) setCycleDay(31);
+                  }}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -360,8 +364,12 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   min="5"
                   max="45"
                   required
-                  value={gracePeriodDays ?? 20}
-                  onChange={(e) => setGracePeriodDays(Number(e.target.value))}
+                  value={gracePeriodDays || ''}
+                  onChange={(e) => setGracePeriodDays(e.target.value === '' ? ('' as unknown as number) : Number(e.target.value))}
+                  onBlur={() => {
+                    if (!gracePeriodDays || gracePeriodDays < 5) setGracePeriodDays(20);
+                    else if (gracePeriodDays > 45) setGracePeriodDays(45);
+                  }}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>

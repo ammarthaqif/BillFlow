@@ -1078,8 +1078,21 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
                         max="31"
                         value={accCycleDay}
                         onChange={(e) => {
-                          const c = parseInt(e.target.value, 10) || 1;
-                          setAccCycleDay(e.target.value);
+                          const val = e.target.value;
+                          setAccCycleDay(val);
+                          if (val.trim() === '') return;
+                          const c = parseInt(val, 10);
+                          if (!isNaN(c) && c >= 1 && c <= 31) {
+                            const d = parseInt(accDueDay, 10) || 8;
+                            const grace = d > c ? d - c : (30 - c) + d;
+                            setAccGraceDays(String(grace));
+                          }
+                        }}
+                        onBlur={() => {
+                          let c = parseInt(accCycleDay, 10);
+                          if (isNaN(c) || c < 1) c = 18;
+                          if (c > 31) c = 31;
+                          setAccCycleDay(String(c));
                           const d = parseInt(accDueDay, 10) || 8;
                           const grace = d > c ? d - c : (30 - c) + d;
                           setAccGraceDays(String(grace));
@@ -1096,8 +1109,21 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
                         max="31"
                         value={accDueDay}
                         onChange={(e) => {
-                          const d = parseInt(e.target.value, 10) || 1;
-                          setAccDueDay(e.target.value);
+                          const val = e.target.value;
+                          setAccDueDay(val);
+                          if (val.trim() === '') return;
+                          const d = parseInt(val, 10);
+                          if (!isNaN(d) && d >= 1 && d <= 31) {
+                            const c = parseInt(accCycleDay, 10) || 18;
+                            const grace = d > c ? d - c : (30 - c) + d;
+                            setAccGraceDays(String(grace));
+                          }
+                        }}
+                        onBlur={() => {
+                          let d = parseInt(accDueDay, 10);
+                          if (isNaN(d) || d < 1) d = 8;
+                          if (d > 31) d = 31;
+                          setAccDueDay(String(d));
                           const c = parseInt(accCycleDay, 10) || 18;
                           const grace = d > c ? d - c : (30 - c) + d;
                           setAccGraceDays(String(grace));
@@ -1111,8 +1137,15 @@ export const UniversalQuickAddModal: React.FC<UniversalQuickAddModalProps> = ({
                       <input
                         type="number"
                         min="1"
+                        max="60"
                         value={accGraceDays}
                         onChange={(e) => setAccGraceDays(e.target.value)}
+                        onBlur={() => {
+                          let g = parseInt(accGraceDays, 10);
+                          if (isNaN(g) || g < 1) g = 20;
+                          if (g > 60) g = 60;
+                          setAccGraceDays(String(g));
+                        }}
                         placeholder="20"
                         className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-emerald-500/60 text-emerald-300 text-xs font-mono"
                       />
