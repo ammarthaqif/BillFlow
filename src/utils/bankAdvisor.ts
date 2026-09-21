@@ -6,6 +6,15 @@ import {
   BankSettlementAdvice 
 } from '../types';
 import { formatCurrency, CurrencyCode } from './currency';
+import { 
+  getDaysBetween, 
+  getDaysDifference, 
+  getTodayDateStr, 
+  formatDate 
+} from './timezone';
+
+// Re-export for compatibility
+export { getDaysBetween };
 
 /**
  * Returns a recommended settlement date (typically 2-3 days before the statement due date)
@@ -13,23 +22,13 @@ import { formatCurrency, CurrencyCode } from './currency';
  */
 export function getRecommendedSettlementDate(dueDateStr: string, bufferDays: number = 2): string {
   try {
-    const due = new Date(dueDateStr);
-    const rec = new Date(due);
-    rec.setDate(rec.getDate() - bufferDays);
-    return rec.toISOString().split('T')[0];
+    const [y, m, d] = dueDateStr.split('T')[0].split('-').map(Number);
+    const due = new Date(Date.UTC(y, m - 1, d));
+    due.setUTCDate(due.getUTCDate() - bufferDays);
+    return due.toISOString().split('T')[0];
   } catch {
     return dueDateStr;
   }
-}
-
-/**
- * Calculates day difference between two YYYY-MM-DD dates
- */
-export function getDaysBetween(dateA: string, dateB: string): number {
-  const d1 = new Date(dateA);
-  const d2 = new Date(dateB);
-  const diff = d2.getTime() - d1.getTime();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
 /**
@@ -92,10 +91,11 @@ export function calculateBankSettlementAdvice(
   targetSettlementDateStr?: string,
   settlementType: 'full_statement' | 'minimum_due' | 'custom' = 'full_statement',
   customAmount?: number,
-  referenceDateStr: string = '2026-10-01'
+  referenceDateStr?: string
 ): BankSettlementAdvice {
   const currency: CurrencyCode = settings.currency || 'MYR';
   const safetyBuffer = settings.safetyBufferAmount ?? 300;
+  const effectiveRefDate = referenceDateStr || getTodayDateStr(settings.timezone);
 
   // Determine amount to settle
   let amountToSettle = targetAccount.statementBalance;
@@ -110,7 +110,7 @@ export function calculateBankSettlementAdvice(
   const daysPriorToDueDate = getDaysBetween(targetSettlementDate, targetAccount.dueDate);
 
   // 1. Calculate incoming paychecks credited to the bank before or on the settlement date
-  const incomingPaychecks = getIncomingPaychecksInWindow(referenceDateStr, targetSettlementDate, settings);
+  const incomingPaychecks = getIncomingPaychecksInWindow(effectiveRefDate, targetSettlementDate, settings);
   const incomingPaychecksAmount = incomingPaychecks.reduce((sum, p) => sum + p.amount, 0);
 
   // 2. Calculate committed outflows from this bank account before or on the settlement date
@@ -121,7 +121,7 @@ export function calculateBankSettlementAdvice(
       // Don't double count if it's already an instruction to this exact target account
       if (si.id !== targetAccount.id) {
         const nextExecDate = si.nextExecutionDate;
-        if (nextExecDate && nextExecDate >= referenceDateStr && nextExecDate <= targetSettlementDate) {
+        if (nextExecDate && nextExecDate >= effectiveRefDate && nextExecDate <= targetSettlementDate) {
           committedSIOutflows.push({
             date: nextExecDate,
             amount: si.amount,
@@ -331,7 +331,8 @@ export function getAllCardsReadinessSummary(
   bankAccount: BillAccount,
   settings: UserSettings,
   standingInstructions: StandingInstruction[] = [],
-  scheduledTransactions: BankScheduledTransaction[] = []
+  scheduledTransactions: BankScheduledTransaction[] = [],
+  referenceDateStr?: string
 ): Array<{
   account: BillAccount;
   statementBalance: number;
@@ -347,6 +348,8 @@ export function getAllCardsReadinessSummary(
     (a) => a.type === 'credit_card' || a.type === 'ewallet_pay_later'
   );
 
+  const effectiveRefDate = referenceDateStr || getTodayDateStr(settings.timezone);
+
   return cardsAndBnpl.map((acc) => {
     const recPayDate = getRecommendedSettlementDate(acc.dueDate, 2);
     const advice = calculateBankSettlementAdvice(
@@ -356,14 +359,16 @@ export function getAllCardsReadinessSummary(
       standingInstructions,
       scheduledTransactions,
       recPayDate,
-      'full_statement'
+      'full_statement',
+      undefined,
+      effectiveRefDate
     );
 
     const isScheduled = scheduledTransactions.some(
       (tx) => tx.targetAccountId === acc.id && tx.status === 'pending'
     );
 
-    const daysRemaining = getDaysBetween('2026-10-01', acc.dueDate);
+    const daysRemaining = getDaysDifference(acc.dueDate, effectiveRefDate, settings.timezone);
 
     return {
       account: acc,

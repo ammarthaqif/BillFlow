@@ -262,6 +262,10 @@ export const QuickPayManageModal: React.FC<QuickPayManageModalProps> = ({
                     required
                     value={defaultAmount}
                     onChange={(e) => setDefaultAmount(e.target.value)}
+                    onBlur={() => {
+                      if (defaultAmount.trim() === '') setDefaultAmount('0.00');
+                    }}
+                    placeholder="0.00"
                     className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-sm text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                   />
                 </div>

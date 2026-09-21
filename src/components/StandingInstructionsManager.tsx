@@ -71,7 +71,7 @@ export function StandingInstructionsManager({
   const [billerOrRecipient, setBillerOrRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [frequency, setFrequency] = useState<StandingInstructionFrequency>('monthly');
-  const [executionDay, setExecutionDay] = useState(1);
+  const [executionDay, setExecutionDay] = useState('1');
   const [sourceAccountId, setSourceAccountId] = useState(accounts[0]?.id || '');
   const [method, setMethod] = useState<StandingInstructionMethod>('bank_standing_instruction');
   const [category, setCategory] = useState('Loan Repayment');
@@ -599,8 +599,15 @@ export function StandingInstructionsManager({
                     type="number"
                     min="1"
                     max="31"
-                    value={executionDay ?? 1}
-                    onChange={(e) => setExecutionDay(Number(e.target.value))}
+                    value={executionDay}
+                    onChange={(e) => setExecutionDay(e.target.value)}
+                    onBlur={() => {
+                      let d = parseInt(executionDay, 10);
+                      if (isNaN(d) || d < 1) d = 1;
+                      if (d > 31) d = 31;
+                      setExecutionDay(String(d));
+                    }}
+                    placeholder="1"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>

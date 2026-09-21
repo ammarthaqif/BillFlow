@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, 
   ArrowRight, 
@@ -59,6 +59,11 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
 }) => {
   const [showExplanation, setShowExplanation] = useState(false);
   const currencyConfig = getCurrencyConfig(currency);
+  const [cashInput, setCashInput] = useState<string>(String(allocatedCash ?? 0));
+
+  useEffect(() => {
+    setCashInput(String(allocatedCash ?? 0));
+  }, [allocatedCash]);
 
   const handleStrategyChange = (s: PaymentStrategyType) => {
     if (onSelectStrategy) onSelectStrategy(s);
@@ -68,6 +73,26 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
   const handleCashChange = (amount: number) => {
     if (onUpdateAllocatedCash) onUpdateAllocatedCash(amount);
     if (onAllocatedCashChange) onAllocatedCashChange(amount);
+  };
+
+  const handleInputChange = (val: string) => {
+    setCashInput(val);
+    if (val.trim() === '') return;
+    const num = parseFloat(val);
+    if (!isNaN(num) && num >= 0) {
+      handleCashChange(num);
+    }
+  };
+
+  const handleInputBlur = () => {
+    const num = parseFloat(cashInput);
+    if (isNaN(num) || num < 0) {
+      setCashInput('0');
+      handleCashChange(0);
+    } else {
+      setCashInput(String(num));
+      handleCashChange(num);
+    }
   };
 
   const effectiveStatementDue =
@@ -234,8 +259,10 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
                 type="number"
                 min="0"
                 step="50"
-                value={allocatedCash ?? 0}
-                onChange={(e) => handleCashChange(Math.max(0, Number(e.target.value)))}
+                value={cashInput}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onBlur={handleInputBlur}
+                placeholder="0"
                 className="w-36 pl-9 pr-3 py-1.5 text-right font-bold text-white bg-slate-900 rounded-lg border border-slate-700 focus:outline-none focus:border-indigo-500 text-sm"
               />
             </div>

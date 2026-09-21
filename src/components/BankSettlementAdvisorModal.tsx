@@ -35,6 +35,7 @@ import {
   getDaysBetween,
   getAllCardsReadinessSummary 
 } from '../utils/bankAdvisor';
+import { getTodayDateStr } from '../utils/timezone';
 
 interface BankSettlementAdvisorModalProps {
   isOpen: boolean;
@@ -117,8 +118,8 @@ export const BankSettlementAdvisorModal: React.FC<BankSettlementAdvisorModalProp
     if (selectedTargetAccount) {
       return getRecommendedSettlementDate(selectedTargetAccount.dueDate, 2);
     }
-    return '2026-10-05';
-  }, [selectedTargetAccount]);
+    return getTodayDateStr(settings?.timezone);
+  }, [selectedTargetAccount, settings?.timezone]);
 
   const [settlementDate, setSettlementDate] = useState<string>(defaultRecommendedDate);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -155,7 +156,7 @@ export const BankSettlementAdvisorModal: React.FC<BankSettlementAdvisorModalProp
       settlementDate,
       settlementType,
       customAmount,
-      '2026-10-01'
+      getTodayDateStr(settings?.timezone)
     );
   }, [
     selectedTargetAccount,

@@ -375,6 +375,7 @@ export const INITIAL_INSTALLMENTS: InstallmentPlan[] = [
 
 export const INITIAL_SETTINGS: UserSettings = {
   currency: 'MYR',
+  timezone: 'Asia/Kuala_Lumpur',
   monthlyIncome: 6500.0,
   paycheckSchedule: 'bi_monthly',
   paycheckDates: [1, 15],

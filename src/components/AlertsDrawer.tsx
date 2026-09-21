@@ -172,14 +172,18 @@ export const AlertsDrawer: React.FC<AlertsDrawerProps> = ({
                     <span>Deadline: {alert.dueDate}</span>
                     <span
                       className={`font-semibold ${
-                        alert.daysRemaining <= 1
+                        alert.daysRemaining < 0
+                          ? 'text-rose-500 animate-pulse'
+                          : alert.daysRemaining <= 1
                           ? 'text-rose-400'
                           : alert.daysRemaining <= 3
                           ? 'text-amber-400'
                           : 'text-emerald-400'
                       }`}
                     >
-                      {alert.daysRemaining === 0
+                      {alert.daysRemaining < 0
+                        ? `${Math.abs(alert.daysRemaining)} day${Math.abs(alert.daysRemaining) === 1 ? '' : 's'} overdue!`
+                        : alert.daysRemaining === 0
                         ? 'Due Today!'
                         : alert.daysRemaining === 1
                         ? 'Due Tomorrow'

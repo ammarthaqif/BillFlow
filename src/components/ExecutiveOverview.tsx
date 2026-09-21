@@ -319,6 +319,10 @@ export const ExecutiveOverview: React.FC<ExecutiveOverviewProps> = ({
                 step="500"
                 value={capInput}
                 onChange={(e) => setCapInput(e.target.value)}
+                onBlur={() => {
+                  if (capInput.trim() === '') setCapInput(spendingCap.toString());
+                }}
+                placeholder="5000"
                 className="w-28 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white font-bold focus:outline-none focus:border-indigo-500"
                 autoFocus
               />

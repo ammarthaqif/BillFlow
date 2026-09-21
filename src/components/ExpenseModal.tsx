@@ -90,7 +90,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   // Form states
   const [title, setTitle] = useState('');
   const [merchant, setMerchant] = useState('');
-  const [amount, setAmount] = useState<number | ''>('');
+  const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [category, setCategory] = useState<ExpenseCategory>('Utilities (Electricity, Water, IWK)');
   const [notes, setNotes] = useState('');
@@ -111,7 +111,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   // PROMPT 2: Repayment Structure ('lump_sum' | 'split_months')
   const [repaymentStructure, setRepaymentStructure] = useState<RepaymentStructure>('lump_sum');
   const [splitMonths, setSplitMonths] = useState<number>(3);
-  const [splitFeeRate, setSplitFeeRate] = useState<number>(0);
+  const [splitFeeRate, setSplitFeeRate] = useState<string>('0');
 
   // Immediate Settlement Toggle (for lump sum credit card / BNPL swipes)
   const [isImmediateSettle, setIsImmediateSettle] = useState(false);
@@ -146,7 +146,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     if (editingExpense) {
       setTitle(editingExpense.title || '');
       setMerchant(editingExpense.merchant || '');
-      setAmount(editingExpense.amount ?? '');
+      setAmount(editingExpense.amount !== undefined && editingExpense.amount !== null ? String(editingExpense.amount) : '');
       setDate(editingExpense.date || new Date().toISOString().split('T')[0]);
       setCategory(editingExpense.category || 'Other');
       setNotes(editingExpense.notes || '');
@@ -170,11 +170,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       if (editingExpense.repaymentStructure) {
         setRepaymentStructure(editingExpense.repaymentStructure);
         setSplitMonths(editingExpense.splitMonths || 3);
-        setSplitFeeRate(editingExpense.splitFeeRate ?? 0);
+        setSplitFeeRate(editingExpense.splitFeeRate !== undefined && editingExpense.splitFeeRate !== null ? String(editingExpense.splitFeeRate) : '0');
       } else {
         setRepaymentStructure('lump_sum');
         setSplitMonths(3);
-        setSplitFeeRate(0);
+        setSplitFeeRate('0');
       }
 
       setIsImmediateSettle(editingExpense.status === 'settled');
@@ -301,7 +301,8 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   };
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
-  const numAmount = typeof amount === 'number' ? amount : 0;
+  const numAmount = parseFloat(amount) || 0;
+  const numSplitFeeRate = parseFloat(splitFeeRate) || 0;
 
   // Day of month derived from selected transaction date
   const parsedDateDay = parseInt(date.split('-')[2], 10);
@@ -314,7 +315,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
   // Monthly split calculation
   const calculatedMonthlySplit = numAmount > 0 && splitMonths > 0
-    ? Math.round(((numAmount * (1 + (splitFeeRate / 100))) / splitMonths) * 100) / 100
+    ? Math.round(((numAmount * (1 + (numSplitFeeRate / 100))) / splitMonths) * 100) / 100
     : 0;
 
   // Interest saved calculation for immediate settlement
@@ -339,7 +340,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !amount || Number(amount) <= 0 || !selectedAccount) {
+    if (!title.trim() || !amount || numAmount <= 0 || !selectedAccount) {
       return;
     }
 
@@ -353,7 +354,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     const payload: Omit<ExpenseItem, 'id'> = {
       title: title.trim(),
       merchant: merchant.trim() || undefined,
-      amount: Number(amount),
+      amount: numAmount,
       date,
       accountId: selectedAccount.id,
       accountName: selectedAccount.name,
@@ -362,7 +363,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       repaymentStructure: (isCashMode || isQRMode) ? 'lump_sum' : repaymentStructure,
       splitMonths: isSplit ? splitMonths : undefined,
       monthlySplitAmount: isSplit ? calculatedMonthlySplit : undefined,
-      splitFeeRate: isSplit && splitFeeRate > 0 ? splitFeeRate : undefined,
+      splitFeeRate: isSplit && numSplitFeeRate > 0 ? numSplitFeeRate : undefined,
       category,
       status: shouldSettleImmediately ? 'settled' : 'unsettled',
       notes: notes.trim() || undefined,
@@ -384,7 +385,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     };
 
     const installmentSplit = isSplit 
-      ? { tenure: splitMonths, monthlyAmount: calculatedMonthlySplit, interestRate: splitFeeRate }
+      ? { tenure: splitMonths, monthlyAmount: calculatedMonthlySplit, interestRate: numSplitFeeRate }
       : undefined;
 
     onSaveExpense(
@@ -508,8 +509,8 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                     min="0.01"
                     step="0.01"
                     placeholder="0.00"
-                    value={amount ?? ''}
-                    onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-semibold text-xs"
                   />
                 </div>
@@ -1065,8 +1066,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                         min="0"
                         max="30"
                         step="0.1"
-                        value={splitFeeRate ?? 0}
-                        onChange={(e) => setSplitFeeRate(Number(e.target.value))}
+                        value={splitFeeRate}
+                        onChange={(e) => setSplitFeeRate(e.target.value)}
+                        onBlur={() => {
+                          if (splitFeeRate.trim() === '') setSplitFeeRate('0');
+                        }}
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs font-medium focus:outline-none focus:border-purple-500"
                         placeholder="0% (0% promo)"
                       />

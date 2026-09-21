@@ -41,15 +41,15 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
   const [name, setName] = useState('');
   const [institution, setInstitution] = useState('');
   const [type, setType] = useState<AccountType>('credit_card');
-  const [totalBalance, setTotalBalance] = useState<number>(1000);
-  const [statementBalance, setStatementBalance] = useState<number>(800);
-  const [creditLimit, setCreditLimit] = useState<number>(5000);
-  const [apr, setApr] = useState<number>(24.99);
-  const [lateFee, setLateFee] = useState<number>(40);
-  const [cycleDay, setCycleDay] = useState<number>(15);
-  const [gracePeriodDays, setGracePeriodDays] = useState<number>(25);
+  const [totalBalance, setTotalBalance] = useState<string>('1000');
+  const [statementBalance, setStatementBalance] = useState<string>('800');
+  const [creditLimit, setCreditLimit] = useState<string>('5000');
+  const [apr, setApr] = useState<string>('24.99');
+  const [lateFee, setLateFee] = useState<string>('40');
+  const [cycleDay, setCycleDay] = useState<string>('15');
+  const [gracePeriodDays, setGracePeriodDays] = useState<string>('25');
   const [dueDate, setDueDate] = useState('2026-10-10');
-  const [minPayment, setMinPayment] = useState<number>(50);
+  const [minPayment, setMinPayment] = useState<string>('50');
 
   if (!isOpen) return null;
 
@@ -114,15 +114,15 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
       institution,
       type,
       color: getColorForType(type),
-      totalBalance,
-      statementBalance,
-      creditLimit,
-      apr,
-      lateFee,
-      cycleDay,
-      gracePeriodDays,
+      totalBalance: Math.max(0, parseFloat(totalBalance) || 0),
+      statementBalance: Math.max(0, parseFloat(statementBalance) || 0),
+      creditLimit: Math.max(0, parseFloat(creditLimit) || 0),
+      apr: Math.max(0, parseFloat(apr) || 0),
+      lateFee: Math.max(0, parseFloat(lateFee) || 0),
+      cycleDay: Math.min(31, Math.max(1, parseInt(cycleDay, 10) || 15)),
+      gracePeriodDays: Math.max(0, parseInt(gracePeriodDays, 10) || 20),
       dueDate,
-      minPayment,
+      minPayment: Math.max(0, parseFloat(minPayment) || 0),
     });
     onClose();
   };
@@ -292,8 +292,12 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   required
                   min="0"
                   step="10"
-                  value={totalBalance ?? 0}
-                  onChange={(e) => setTotalBalance(Number(e.target.value))}
+                  value={totalBalance}
+                  onChange={(e) => setTotalBalance(e.target.value)}
+                  onBlur={() => {
+                    if (totalBalance.trim() === '') setTotalBalance('0');
+                  }}
+                  placeholder="0.00"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -307,8 +311,12 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   required
                   min="0"
                   step="10"
-                  value={statementBalance ?? 0}
-                  onChange={(e) => setStatementBalance(Number(e.target.value))}
+                  value={statementBalance}
+                  onChange={(e) => setStatementBalance(e.target.value)}
+                  onBlur={() => {
+                    if (statementBalance.trim() === '') setStatementBalance('0');
+                  }}
+                  placeholder="0.00"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -321,8 +329,12 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   type="number"
                   step="0.1"
                   required
-                  value={apr ?? 0}
-                  onChange={(e) => setApr(Number(e.target.value))}
+                  value={apr}
+                  onChange={(e) => setApr(e.target.value)}
+                  onBlur={() => {
+                    if (apr.trim() === '') setApr('0');
+                  }}
+                  placeholder="0.0"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -334,8 +346,12 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                 <input
                   type="number"
                   required
-                  value={lateFee ?? 0}
-                  onChange={(e) => setLateFee(Number(e.target.value))}
+                  value={lateFee}
+                  onChange={(e) => setLateFee(e.target.value)}
+                  onBlur={() => {
+                    if (lateFee.trim() === '') setLateFee('0');
+                  }}
+                  placeholder="0.00"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -347,12 +363,15 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   min="1"
                   max="31"
                   required
-                  value={cycleDay || ''}
-                  onChange={(e) => setCycleDay(e.target.value === '' ? ('' as unknown as number) : Number(e.target.value))}
+                  value={cycleDay}
+                  onChange={(e) => setCycleDay(e.target.value)}
                   onBlur={() => {
-                    if (!cycleDay || cycleDay < 1) setCycleDay(15);
-                    else if (cycleDay > 31) setCycleDay(31);
+                    let c = parseInt(cycleDay, 10);
+                    if (isNaN(c) || c < 1) c = 15;
+                    else if (c > 31) c = 31;
+                    setCycleDay(String(c));
                   }}
+                  placeholder="15"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -364,12 +383,15 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   min="5"
                   max="45"
                   required
-                  value={gracePeriodDays || ''}
-                  onChange={(e) => setGracePeriodDays(e.target.value === '' ? ('' as unknown as number) : Number(e.target.value))}
+                  value={gracePeriodDays}
+                  onChange={(e) => setGracePeriodDays(e.target.value)}
                   onBlur={() => {
-                    if (!gracePeriodDays || gracePeriodDays < 5) setGracePeriodDays(20);
-                    else if (gracePeriodDays > 45) setGracePeriodDays(45);
+                    let g = parseInt(gracePeriodDays, 10);
+                    if (isNaN(g) || g < 5) g = 20;
+                    else if (g > 45) g = 45;
+                    setGracePeriodDays(String(g));
                   }}
+                  placeholder="25"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -395,8 +417,12 @@ export const BankSyncModal: React.FC<BankSyncModalProps> = ({
                   type="number"
                   min="0"
                   required
-                  value={minPayment ?? 0}
-                  onChange={(e) => setMinPayment(Number(e.target.value))}
+                  value={minPayment}
+                  onChange={(e) => setMinPayment(e.target.value)}
+                  onBlur={() => {
+                    if (minPayment.trim() === '') setMinPayment('0');
+                  }}
+                  placeholder="0.00"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>

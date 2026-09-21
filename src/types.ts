@@ -237,6 +237,7 @@ export interface PaymentScheduleItem {
 
 export interface UserSettings {
   currency: CurrencyCode;
+  timezone?: string; // User timezone (e.g. 'Asia/Kuala_Lumpur')
   monthlyIncome: number;
   paycheckSchedule: 'monthly' | 'bi_monthly' | 'weekly';
   paycheckDates: number[]; // e.g. [1, 15] or [28]

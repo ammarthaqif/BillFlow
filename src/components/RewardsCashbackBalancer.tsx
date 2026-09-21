@@ -46,7 +46,8 @@ export const RewardsCashbackBalancer: React.FC<RewardsCashbackBalancerProps> = (
   onQuickLogExpense,
 }) => {
   // Simulator State
-  const [simAmount, setSimAmount] = useState<number>(200);
+  const [simAmountInput, setSimAmountInput] = useState<string>('200');
+  const simAmount = Math.max(0, parseFloat(simAmountInput) || 0);
   const [simDate, setSimDate] = useState<string>(new Date().toISOString().substring(0, 10));
   const [simCategory, setSimCategory] = useState<string>('dining');
   const [simDescription, setSimDescription] = useState<string>('Weekend Dinner');
@@ -385,8 +386,12 @@ export const RewardsCashbackBalancer: React.FC<RewardsCashbackBalancerProps> = (
                     type="number"
                     min="1"
                     step="10"
-                    value={simAmount}
-                    onChange={(e) => setSimAmount(parseFloat(e.target.value) || 0)}
+                    value={simAmountInput}
+                    onChange={(e) => setSimAmountInput(e.target.value)}
+                    onBlur={() => {
+                      if (simAmountInput.trim() === '') setSimAmountInput('0');
+                    }}
+                    placeholder="0.00"
                     className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-bold focus:outline-none focus:border-indigo-500"
                   />
                   <div className="absolute right-2.5 top-2 flex gap-1">
@@ -394,7 +399,7 @@ export const RewardsCashbackBalancer: React.FC<RewardsCashbackBalancerProps> = (
                       <button
                         key={quick}
                         type="button"
-                        onClick={() => setSimAmount(quick)}
+                        onClick={() => setSimAmountInput(String(quick))}
                         className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer ${
                           simAmount === quick
                             ? 'bg-indigo-600 text-white font-bold'

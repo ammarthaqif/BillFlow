@@ -116,7 +116,7 @@ export function ReceiptCaptureModal({
 
   // Editable Form Fields
   const [merchant, setMerchant] = useState('');
-  const [amount, setAmount] = useState<number>(0);
+  const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState('');
   const [category, setCategory] = useState('Dining & Groceries');
   const [referenceNumber, setReferenceNumber] = useState('');
@@ -209,7 +209,7 @@ export function ReceiptCaptureModal({
   const handleSelectPreset = (sample: typeof SAMPLE_RECEIPTS[0]) => {
     setSelectedImage(sample.dataUrl);
     setMerchant(sample.merchant);
-    setAmount(sample.amount);
+    setAmount(String(sample.amount));
     setDate(sample.date);
     setCategory(sample.category);
     setReferenceNumber(sample.referenceNumber);
@@ -254,7 +254,7 @@ export function ReceiptCaptureModal({
         const result: ExtractedReceiptData = await response.json();
         setExtractedData(result);
         setMerchant(result.merchant || 'Merchant');
-        setAmount(result.amount || 0);
+        setAmount(result.amount != null ? String(result.amount) : '0');
         setDate(result.date || new Date().toISOString().split('T')[0]);
         setCategory(result.category || 'Dining & Groceries');
         setReferenceNumber(result.referenceNumber || '');
@@ -281,7 +281,7 @@ export function ReceiptCaptureModal({
       };
       setExtractedData(fallback);
       setMerchant(fallback.merchant);
-      setAmount(fallback.amount);
+      setAmount(String(fallback.amount));
       setDate(fallback.date);
       setCategory(fallback.category);
       setReferenceNumber(fallback.referenceNumber || '');
@@ -297,7 +297,8 @@ export function ReceiptCaptureModal({
     const selectedAcc = accounts.find((a) => a.id === selectedAccountId);
     const expenseId = `exp-rcpt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const isSplit = repaymentStructure === 'split_months';
-    const monthlySplitAmount = isSplit && splitMonths > 0 ? Number((amount / splitMonths).toFixed(2)) : undefined;
+    const numericAmount = Math.max(0, parseFloat(amount) || 0);
+    const monthlySplitAmount = isSplit && splitMonths > 0 ? Number((numericAmount / splitMonths).toFixed(2)) : undefined;
 
     const expenseItem: ExpenseItem = {
       id: expenseId,
@@ -310,7 +311,7 @@ export function ReceiptCaptureModal({
       monthlySplitAmount,
       title: `${merchant} - Receipt Purchase`,
       merchant,
-      amount,
+      amount: numericAmount,
       date: date || new Date().toISOString().split('T')[0],
       category,
       status: selectedPaymentMode === 'cash' ? 'settled' : 'unsettled',
@@ -331,8 +332,8 @@ export function ReceiptCaptureModal({
         accountName: selectedAcc.name,
         title: `${merchant || 'Receipt Purchase'} (${splitMonths}x Split)`,
         category: 'Other',
-        totalAmount: amount,
-        monthlyAmount: monthlySplitAmount || (amount / splitMonths),
+        totalAmount: numericAmount,
+        monthlyAmount: monthlySplitAmount || (numericAmount / splitMonths),
         totalTenure: splitMonths,
         remainingTenure: splitMonths,
         interestRate: 0,
@@ -607,8 +608,12 @@ export function ReceiptCaptureModal({
                       <input
                         type="number"
                         step="0.01"
-                        value={amount ?? 0}
-                        onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        onBlur={() => {
+                          if (amount.trim() === '') setAmount('0.00');
+                        }}
+                        placeholder="0.00"
                         required
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-bold text-emerald-400 focus:outline-none focus:border-indigo-500"
                       />
@@ -829,7 +834,7 @@ export function ReceiptCaptureModal({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-slate-300">Select Installment Tenure:</span>
                       <span className="text-xs font-bold text-emerald-400">
-                        {formatCurrency(amount / splitMonths, activeCurrency)} / month
+                        {formatCurrency((parseFloat(amount) || 0) / splitMonths, activeCurrency)} / month
                       </span>
                     </div>
 

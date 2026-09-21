@@ -39,13 +39,16 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
   const [title, setTitle] = useState('');
   const [accountId, setAccountId] = useState(accounts[0]?.id || '');
   const [category, setCategory] = useState<InstallmentPlan['category']>('Electronics');
-  const [totalAmount, setTotalAmount] = useState<number>(600);
-  const [totalTenure, setTotalTenure] = useState<number>(6);
-  const [remainingTenure, setRemainingTenure] = useState<number>(6);
+  const [totalAmount, setTotalAmount] = useState<string>('600');
+  const [totalTenure, setTotalTenure] = useState<string>('6');
+  const [remainingTenure, setRemainingTenure] = useState<string>('6');
   const [interestRate, setInterestRate] = useState<number>(0);
   const [notes, setNotes] = useState('');
 
-  const monthlyAmount = totalTenure > 0 ? Math.round((totalAmount / totalTenure) * 100) / 100 : 0;
+  const numTotalAmount = Math.max(0, parseFloat(totalAmount) || 0);
+  const numTotalTenure = Math.max(1, parseInt(totalTenure, 10) || 1);
+  const numRemainingTenure = Math.max(1, parseInt(remainingTenure, 10) || 1);
+  const monthlyAmount = numTotalTenure > 0 ? Math.round((numTotalAmount / numTotalTenure) * 100) / 100 : 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,10 +61,10 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
       accountName: targetAccount ? targetAccount.name : 'Unknown Card',
       title,
       category,
-      totalAmount,
+      totalAmount: numTotalAmount,
       monthlyAmount,
-      totalTenure,
-      remainingTenure,
+      totalTenure: numTotalTenure,
+      remainingTenure: numRemainingTenure,
       interestRate,
       startDate: new Date().toISOString().split('T')[0],
       nextBillingDate: targetAccount ? targetAccount.dueDate : '2026-10-15',
@@ -371,8 +374,12 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                     min="1"
                     step="10"
                     required
-                    value={totalAmount ?? 0}
-                    onChange={(e) => setTotalAmount(Number(e.target.value))}
+                    value={totalAmount}
+                    onChange={(e) => setTotalAmount(e.target.value)}
+                    onBlur={() => {
+                      if (totalAmount.trim() === '') setTotalAmount('0');
+                    }}
+                    placeholder="0.00"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-xs font-semibold"
                   />
                 </div>
@@ -381,15 +388,25 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                   <label className="block text-slate-300 font-medium mb-1">Tenure (Mos)</label>
                   <input
                     type="number"
-                    min="2"
+                    min="1"
                     max="60"
                     required
-                    value={totalTenure ?? 1}
+                    value={totalTenure}
                     onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setTotalTenure(val);
-                      if (remainingTenure > val) setRemainingTenure(val);
+                      setTotalTenure(e.target.value);
+                      const parsed = parseInt(e.target.value, 10);
+                      if (!isNaN(parsed) && parseInt(remainingTenure, 10) > parsed) {
+                        setRemainingTenure(String(parsed));
+                      }
                     }}
+                    onBlur={() => {
+                      let t = parseInt(totalTenure, 10);
+                      if (isNaN(t) || t < 1) t = 1;
+                      if (t > 60) t = 60;
+                      setTotalTenure(String(t));
+                      if (parseInt(remainingTenure, 10) > t) setRemainingTenure(String(t));
+                    }}
+                    placeholder="1"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-xs"
                   />
                 </div>
@@ -399,10 +416,18 @@ export const InstallmentsCashFlowTracker: React.FC<InstallmentsCashFlowTrackerPr
                   <input
                     type="number"
                     min="1"
-                    max={totalTenure}
+                    max={numTotalTenure}
                     required
-                    value={remainingTenure ?? 1}
-                    onChange={(e) => setRemainingTenure(Number(e.target.value))}
+                    value={remainingTenure}
+                    onChange={(e) => setRemainingTenure(e.target.value)}
+                    onBlur={() => {
+                      let r = parseInt(remainingTenure, 10);
+                      const maxT = Math.max(1, parseInt(totalTenure, 10) || 1);
+                      if (isNaN(r) || r < 1) r = 1;
+                      if (r > maxT) r = maxT;
+                      setRemainingTenure(String(r));
+                    }}
+                    placeholder="1"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-xs"
                   />
                 </div>

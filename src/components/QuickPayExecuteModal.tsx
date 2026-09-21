@@ -262,6 +262,14 @@ export const QuickPayExecuteModal: React.FC<QuickPayExecuteModalProps> = ({
                 min="0.01"
                 value={amountInput}
                 onChange={(e) => handleAmountInputChange(e.target.value)}
+                onBlur={() => {
+                  if (amountInput.trim() === '') {
+                    const def = template?.defaultAmount ?? 0;
+                    setAmountInput(def.toString());
+                    setAmount(def);
+                  }
+                }}
+                placeholder="0.00"
                 required
                 className="w-full pl-12 pr-4 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-lg font-bold text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 font-mono"
               />

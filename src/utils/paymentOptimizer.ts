@@ -1,34 +1,30 @@
 import { BillAccount, InstallmentPlan, MonthlyCashFlowProjection, PaymentScheduleItem, PaymentStrategyType, CustomAlert } from '../types';
 import { CurrencyCode, formatCurrency } from './currency';
+import { 
+  getDaysDifference, 
+  formatDate, 
+  getTodayDateStr, 
+  getTodayYearMonth 
+} from './timezone';
 
-export function getDaysDifference(targetDateStr: string, fromDateStr = '2026-10-01'): number {
-  const target = new Date(targetDateStr);
-  const from = new Date(fromDateStr);
-  const diffTime = target.getTime() - from.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-}
-
-export function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
+// Re-export timezone date utilities for backwards compatibility
+export { getDaysDifference, formatDate };
 
 /**
- * Calculates optimal payment schedule based on user's strategy and available cash.
+ * Calculates optimal payment schedule based on user's strategy and available cash,
+ * strictly aligned with the user's timezone.
  */
 export function calculatePaymentSchedule(
   accounts: BillAccount[],
   strategy: PaymentStrategyType,
   availableCash: number,
-  paycheckDates: number[] = [1, 15]
+  paycheckDates: number[] = [1, 15],
+  timeZone?: string
 ): PaymentScheduleItem[] {
+  const todayStr = getTodayDateStr(timeZone);
+
   // Only bill/debt accounts need to be paid (exclude liquid bank_account)
   const billAccounts = (accounts || []).filter((a) => a.type !== 'bank_account');
-  const totalMinRequired = billAccounts.reduce((sum, a) => sum + a.minPayment, 0);
 
   // Clone bill accounts to avoid mutation
   const sortedAccounts = [...billAccounts];
@@ -39,8 +35,8 @@ export function calculatePaymentSchedule(
     // 1) Due Date (earliest first)
     // 2) Penalty severity (late fee + APR)
     sortedAccounts.sort((a, b) => {
-      const daysA = getDaysDifference(a.dueDate);
-      const daysB = getDaysDifference(b.dueDate);
+      const daysA = getDaysDifference(a.dueDate, todayStr, timeZone);
+      const daysB = getDaysDifference(b.dueDate, todayStr, timeZone);
       if (daysA !== daysB) return daysA - daysB;
       // If same due date, higher APR first to save interest
       return b.apr - a.apr;
@@ -54,8 +50,8 @@ export function calculatePaymentSchedule(
   } else if (strategy === 'cashflow_buffer') {
     // Aligns with upcoming paycheck dates
     sortedAccounts.sort((a, b) => {
-      const daysA = getDaysDifference(a.dueDate);
-      const daysB = getDaysDifference(b.dueDate);
+      const daysA = getDaysDifference(a.dueDate, todayStr, timeZone);
+      const daysB = getDaysDifference(b.dueDate, todayStr, timeZone);
       return daysA - daysB;
     });
   }
@@ -86,7 +82,7 @@ export function calculatePaymentSchedule(
 
   // Build schedule items
   sortedAccounts.forEach((acc) => {
-    const daysRemaining = getDaysDifference(acc.dueDate);
+    const daysRemaining = getDaysDifference(acc.dueDate, todayStr, timeZone);
     const allocated = allocatedMap.get(acc.id) || 0;
 
     let paymentType: 'full_statement' | 'minimum_due' | 'optimized_partial' = 'full_statement';
@@ -99,9 +95,10 @@ export function calculatePaymentSchedule(
     }
 
     // Determine recommended payment execution date (1-2 days before due date to maximize float while guaranteeing safety)
-    const dueDateObj = new Date(acc.dueDate);
+    const [dueY, dueM, dueD] = acc.dueDate.split('-').map(Number);
+    const dueDateObj = new Date(Date.UTC(dueY, dueM - 1, dueD));
     const recPayDateObj = new Date(dueDateObj);
-    recPayDateObj.setDate(recPayDateObj.getDate() - 2); // 2 days buffer for ACH/bank clearing
+    recPayDateObj.setUTCDate(recPayDateObj.getUTCDate() - 2); // 2 days buffer for ACH/bank clearing
     const recPayDateStr = recPayDateObj.toISOString().split('T')[0];
 
     // Calculate savings
@@ -119,11 +116,11 @@ export function calculatePaymentSchedule(
     if (strategy === 'grace_float') {
       rationale = `Grace period gives ${acc.gracePeriodDays} interest-free days. Schedule payment for ${formatDate(recPayDateStr)} (2 days before due) to maximize cash float while guaranteeing $0 late fee and $0 interest.`;
     } else if (strategy === 'avalanche') {
-      rationale = `Carries ${acc.apr}% APR (costing ~$${monthlyInterestSaved}/mo if unpaid). High-priority avalanche payoff prevents compounded interest drag.`;
+      rationale = `Carries ${acc.apr}% APR (costing ~${formatCurrency(monthlyInterestSaved, 'MYR')}/mo if unpaid). High-priority avalanche payoff prevents compounded interest drag.`;
     } else if (strategy === 'snowball') {
-      rationale = `Balance of $${acc.statementBalance.toFixed(2)} can be cleared quickly to eliminate a monthly bill requirement and build momentum.`;
+      rationale = `Balance of ${formatCurrency(acc.statementBalance, 'MYR')} can be cleared quickly to eliminate a monthly bill requirement and build momentum.`;
     } else {
-      rationale = `Timed with Paycheck drop on day ${paycheckDates.find((d) => d <= dueDateObj.getDate()) || paycheckDates[0]} to preserve checking account liquidity buffer.`;
+      rationale = `Timed with Paycheck drop on day ${paycheckDates.find((d) => d <= dueD) || paycheckDates[0]} to preserve checking account liquidity buffer.`;
     }
 
     scheduleItems.push({
@@ -155,30 +152,50 @@ export function calculatePaymentSchedule(
 
 /**
  * Generates dynamic alerts based on upcoming cycle deadlines, high utilization, and installments.
+ * Accurately calculates days remaining relative to today in the user's active timezone.
  */
 export function generateAlerts(
   accounts: BillAccount[], 
   installments: InstallmentPlan[], 
-  currency: CurrencyCode = 'MYR'
+  currency: CurrencyCode = 'MYR',
+  timeZone?: string,
+  customTodayDateStr?: string
 ): CustomAlert[] {
   const alerts: CustomAlert[] = [];
+  const todayStr = customTodayDateStr || getTodayDateStr(timeZone);
 
   accounts.forEach((acc) => {
     // Bank accounts are liquid cash deposit accounts, not debt or credit lines
     if (acc.type === 'bank_account') return;
 
-    const days = getDaysDifference(acc.dueDate);
+    const days = getDaysDifference(acc.dueDate, todayStr, timeZone);
     const isRevolving = acc.type === 'credit_card' || acc.type === 'ewallet_pay_later';
     const limit = acc.creditLimit || 0;
     const utilization = isRevolving && limit > 0 ? Math.round((acc.totalBalance / limit) * 100) : 0;
 
-    if (days <= 3 && days >= 0) {
+    if (days < 0) {
+      // Overdue alert
+      const overdueDays = Math.abs(days);
+      alerts.push({
+        id: `alert-due-overdue-${acc.id}`,
+        accountId: acc.id,
+        accountName: acc.name,
+        type: 'due_soon',
+        title: `Payment Overdue (${overdueDays} Day${overdueDays === 1 ? '' : 's'})!`,
+        message: `${acc.name} was due on ${formatDate(acc.dueDate)}. Immediate settlement of ${formatCurrency(acc.statementBalance, currency)} is required to prevent late fees and interest.`,
+        dueDate: acc.dueDate,
+        daysRemaining: days,
+        severity: 'urgent',
+        read: false,
+        actionAmount: acc.statementBalance,
+      });
+    } else if (days <= 3) {
       alerts.push({
         id: `alert-due-urgent-${acc.id}`,
         accountId: acc.id,
         accountName: acc.name,
         type: 'due_soon',
-        title: `Payment Due in ${days} Day${days === 1 ? '' : 's'}!`,
+        title: days === 0 ? `Payment Due Today: ${acc.name}!` : `Payment Due in ${days} Day${days === 1 ? '' : 's'}!`,
         message: `${acc.name} due date is ${formatDate(acc.dueDate)}. Pay at least ${formatCurrency(acc.minPayment, currency)} to avoid a ${formatCurrency(acc.lateFee, currency)} late fee.`,
         dueDate: acc.dueDate,
         daysRemaining: days,
@@ -186,14 +203,14 @@ export function generateAlerts(
         read: false,
         actionAmount: acc.statementBalance,
       });
-    } else if (days <= 7 && days > 3) {
+    } else if (days <= 7) {
       alerts.push({
         id: `alert-due-warning-${acc.id}`,
         accountId: acc.id,
         accountName: acc.name,
         type: 'grace_expiring',
         title: `Grace Period Ending: ${acc.name}`,
-        message: `Statement balance of ${formatCurrency(acc.statementBalance, currency)} is due in ${days} days. Clear before grace period expires to pay 0% interest.`,
+        message: `Statement balance of ${formatCurrency(acc.statementBalance, currency)} is due in ${days} days (${formatDate(acc.dueDate)}). Clear before grace period expires to pay 0% interest.`,
         dueDate: acc.dueDate,
         daysRemaining: days,
         severity: 'warning',
@@ -220,6 +237,7 @@ export function generateAlerts(
   });
 
   installments.forEach((inst) => {
+    const instDays = getDaysDifference(inst.nextBillingDate, todayStr, timeZone);
     if (inst.remainingTenure === 1) {
       alerts.push({
         id: `alert-inst-last-${inst.id}`,
@@ -227,9 +245,9 @@ export function generateAlerts(
         accountName: inst.accountName,
         type: 'installment_finishing',
         title: `Final Installment: ${inst.title}`,
-        message: `Your final payment of ${formatCurrency(inst.monthlyAmount, currency)} for ${inst.title} is due this month. Once paid, you free up ${formatCurrency(inst.monthlyAmount, currency)} monthly cash flow!`,
+        message: `Your final payment of ${formatCurrency(inst.monthlyAmount, currency)} for ${inst.title} is due in ${instDays} days (${formatDate(inst.nextBillingDate)}). Once paid, you free up ${formatCurrency(inst.monthlyAmount, currency)} monthly cash flow!`,
         dueDate: inst.nextBillingDate,
-        daysRemaining: getDaysDifference(inst.nextBillingDate),
+        daysRemaining: instDays,
         severity: 'info',
         read: false,
         actionAmount: inst.monthlyAmount,
@@ -244,23 +262,30 @@ export function generateAlerts(
 }
 
 /**
- * Projects monthly cash flow and installment commitments for the next 6 months.
+ * Projects monthly cash flow and installment commitments for the next 6 months
+ * starting from the active month in the user's timezone.
  */
 export function projectMonthlyCashFlow(
   accounts: BillAccount[],
   installments: InstallmentPlan[],
   monthlyIncome = 6500,
-  monthsCount = 6
+  monthsCount = 6,
+  timeZone?: string
 ): MonthlyCashFlowProjection[] {
   const projections: MonthlyCashFlowProjection[] = [];
-  const baseMonth = new Date('2026-10-01');
+  const [currentYear, currentMonth] = getTodayYearMonth(timeZone);
 
   for (let m = 0; m < monthsCount; m++) {
-    const currentMonthDate = new Date(baseMonth);
-    currentMonthDate.setMonth(baseMonth.getMonth() + m);
+    // 0-indexed month in Date.UTC
+    const targetMonthIndex = (currentMonth - 1) + m;
+    const currentMonthDate = new Date(Date.UTC(currentYear, targetMonthIndex, 1));
 
     const monthKey = currentMonthDate.toISOString().slice(0, 7);
-    const monthLabel = currentMonthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const monthLabel = currentMonthDate.toLocaleDateString('en-US', { 
+      timeZone: 'UTC',
+      month: 'short', 
+      year: 'numeric' 
+    });
 
     // Active installments in month m
     let totalInstallmentMonth = 0;

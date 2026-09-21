@@ -45,16 +45,16 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   const [name, setName] = useState('');
   const [institution, setInstitution] = useState('');
   const [accountNumberMask, setAccountNumberMask] = useState('');
-  const [statementBalance, setStatementBalance] = useState<number>(0);
-  const [totalBalance, setTotalBalance] = useState<number>(0);
-  const [creditLimit, setCreditLimit] = useState<number>(0);
-  const [apr, setApr] = useState<number>(0);
-  const [lateFee, setLateFee] = useState<number>(0);
+  const [statementBalance, setStatementBalance] = useState<string>('0');
+  const [totalBalance, setTotalBalance] = useState<string>('0');
+  const [creditLimit, setCreditLimit] = useState<string>('0');
+  const [apr, setApr] = useState<string>('0');
+  const [lateFee, setLateFee] = useState<string>('0');
   const [cycleDayInput, setCycleDayInput] = useState<string>('18');
   const [dueDayInput, setDueDayInput] = useState<string>('8');
   const [gracePeriodDaysInput, setGracePeriodDaysInput] = useState<string>('20');
   const [dueDate, setDueDate] = useState('');
-  const [minPayment, setMinPayment] = useState<number>(0);
+  const [minPayment, setMinPayment] = useState<string>('0');
   const [color, setColor] = useState('#4f46e5');
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +62,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
   const [isSharedLimit, setIsSharedLimit] = useState<boolean>(false);
   const [sharedLimitGroupId, setSharedLimitGroupId] = useState<string>('');
   const [sharedLimitGroupName, setSharedLimitGroupName] = useState<string>('');
-  const [sharedCreditLimit, setSharedCreditLimit] = useState<number>(0);
+  const [sharedCreditLimit, setSharedCreditLimit] = useState<string>('0');
   const [selectedPairedCardId, setSelectedPairedCardId] = useState<string>('');
 
   // Helper to calculate next upcoming due date from a day-of-month (1-31)
@@ -100,11 +100,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       setName(account.name || '');
       setInstitution(account.institution || '');
       setAccountNumberMask(account.accountNumberMask || '');
-      setStatementBalance(account.statementBalance || 0);
-      setTotalBalance(account.totalBalance || 0);
-      setCreditLimit(account.creditLimit || 0);
-      setApr(account.apr || 0);
-      setLateFee(account.lateFee || 0);
+      setStatementBalance(String(account.statementBalance ?? 0));
+      setTotalBalance(String(account.totalBalance ?? 0));
+      setCreditLimit(String(account.creditLimit ?? 0));
+      setApr(String(account.apr ?? 0));
+      setLateFee(String(account.lateFee ?? 0));
       
       const cDay = account.cycleDay || 18;
       setCycleDayInput(String(cDay));
@@ -125,7 +125,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       setGracePeriodDaysInput(String(initialGrace));
       setDueDate(account.dueDate || calculateNextDueDate(initialDueDay));
 
-      setMinPayment(account.minPayment || 0);
+      setMinPayment(String(account.minPayment ?? 0));
       setColor(account.color || '#4f46e5');
 
       // Shared limit setup
@@ -133,7 +133,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       setIsSharedLimit(hasShared);
       setSharedLimitGroupId(account.sharedLimitGroupId || (hasShared ? `group-${account.id}` : ''));
       setSharedLimitGroupName(account.sharedLimitGroupName || (hasShared ? `${account.institution || 'Bank'} Combined Limit` : ''));
-      setSharedCreditLimit(account.sharedCreditLimit || account.creditLimit || 0);
+      setSharedCreditLimit(String(account.sharedCreditLimit || account.creditLimit || 0));
 
       // Look for paired card in the same shared limit group
       if (hasShared && account.sharedLimitGroupId && allAccounts.length > 0) {
@@ -259,9 +259,9 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       setSharedLimitGroupId(gId);
       const gName = paired.sharedLimitGroupName || `${account.institution || paired.institution} 2 Cards Combined Limit`;
       setSharedLimitGroupName(gName);
-      const limit = paired.sharedCreditLimit || paired.creditLimit || creditLimit;
-      setSharedCreditLimit(limit);
-      setCreditLimit(limit);
+      const limit = paired.sharedCreditLimit || paired.creditLimit || (parseFloat(creditLimit) || 0);
+      setSharedCreditLimit(String(limit));
+      setCreditLimit(String(limit));
     }
   };
 
@@ -272,24 +272,26 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
       return;
     }
 
-    const effectiveLimit = isSharedLimit ? (sharedCreditLimit || creditLimit) : creditLimit;
+    const numCreditLimit = parseFloat(creditLimit) || 0;
+    const numSharedLimit = parseFloat(sharedCreditLimit) || 0;
+    const effectiveLimit = isSharedLimit ? (numSharedLimit || numCreditLimit) : numCreditLimit;
 
     const updated: BillAccount = {
       ...account,
       name: name.trim(),
       institution: institution.trim() || account.institution,
       accountNumberMask: accountNumberMask.trim() || account.accountNumberMask,
-      statementBalance: Math.max(0, Number(statementBalance) || 0),
-      totalBalance: Math.max(0, Number(totalBalance) || 0),
-      currentBalance: isBank ? Math.max(0, Number(totalBalance) || 0) : undefined,
-      creditLimit: Math.max(0, Number(effectiveLimit) || 0),
-      apr: Math.max(0, Number(apr) || 0),
-      lateFee: Math.max(0, Number(lateFee) || 0),
+      statementBalance: Math.max(0, parseFloat(statementBalance) || 0),
+      totalBalance: Math.max(0, parseFloat(totalBalance) || 0),
+      currentBalance: isBank ? Math.max(0, parseFloat(totalBalance) || 0) : undefined,
+      creditLimit: Math.max(0, effectiveLimit),
+      apr: Math.max(0, parseFloat(apr) || 0),
+      lateFee: Math.max(0, parseFloat(lateFee) || 0),
       cycleDay: Math.min(31, Math.max(1, parseInt(cycleDayInput, 10) || 1)),
       dueDay: Math.min(31, Math.max(1, parseInt(dueDayInput, 10) || 1)),
       gracePeriodDays: Math.max(0, parseInt(gracePeriodDaysInput, 10) || 0),
       dueDate: dueDate || account.dueDate,
-      minPayment: Math.max(0, Number(minPayment) || 0),
+      minPayment: Math.max(0, parseFloat(minPayment) || 0),
       color: color || account.color,
       lastSyncedAt: new Date().toISOString(),
 
@@ -302,7 +304,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
         ? (sharedLimitGroupName.trim() || `${account.name} Combined Limit`) 
         : undefined,
       sharedCreditLimit: isSharedLimit 
-        ? Math.max(0, Number(sharedCreditLimit) || Number(creditLimit) || 0) 
+        ? Math.max(0, numSharedLimit || numCreditLimit) 
         : undefined,
     };
 
@@ -423,7 +425,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                     step="0.01"
                     min="0"
                     value={totalBalance}
-                    onChange={(e) => setTotalBalance(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => setTotalBalance(e.target.value)}
+                    onBlur={() => {
+                      if (totalBalance.trim() === '') setTotalBalance('0');
+                    }}
+                    placeholder="0.00"
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -439,7 +445,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       step="0.01"
                       min="0"
                       value={statementBalance}
-                      onChange={(e) => setStatementBalance(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => setStatementBalance(e.target.value)}
+                      onBlur={() => {
+                        if (statementBalance.trim() === '') setStatementBalance('0');
+                      }}
+                      placeholder="0.00"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -461,12 +471,16 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       min="0"
                       value={creditLimit}
                       onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
+                        const val = e.target.value;
                         setCreditLimit(val);
-                        if (isSharedLimit && !sharedCreditLimit) {
+                        if (isSharedLimit && (!sharedCreditLimit || sharedCreditLimit === '0')) {
                           setSharedCreditLimit(val);
                         }
                       }}
+                      onBlur={() => {
+                        if (creditLimit.trim() === '') setCreditLimit('0');
+                      }}
+                      placeholder="0.00"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -481,7 +495,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       step="0.01"
                       min="0"
                       value={minPayment}
-                      onChange={(e) => setMinPayment(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => setMinPayment(e.target.value)}
+                      onBlur={() => {
+                        if (minPayment.trim() === '') setMinPayment('0');
+                      }}
+                      placeholder="0.00"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -548,7 +566,10 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                           step="0.01"
                           min="0"
                           value={sharedCreditLimit}
-                          onChange={(e) => setSharedCreditLimit(parseFloat(e.target.value) || 0)}
+                          onChange={(e) => setSharedCreditLimit(e.target.value)}
+                          onBlur={() => {
+                            if (sharedCreditLimit.trim() === '') setSharedCreditLimit('0');
+                          }}
                           placeholder="e.g. 15000"
                           className="w-full bg-slate-900 border border-amber-500/50 rounded-xl pl-10 pr-3 py-2 text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-400"
                         />
@@ -717,7 +738,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       step="0.1"
                       min="0"
                       value={apr}
-                      onChange={(e) => setApr(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => setApr(e.target.value)}
+                      onBlur={() => {
+                        if (apr.trim() === '') setApr('0');
+                      }}
+                      placeholder="0.0"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -729,7 +754,11 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
                       step="0.01"
                       min="0"
                       value={lateFee}
-                      onChange={(e) => setLateFee(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => setLateFee(e.target.value)}
+                      onBlur={() => {
+                        if (lateFee.trim() === '') setLateFee('0');
+                      }}
+                      placeholder="0.00"
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-rose-400 font-mono font-bold focus:outline-none focus:border-indigo-500"
                     />
                   </div>

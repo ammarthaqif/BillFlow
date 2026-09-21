@@ -269,23 +269,23 @@ export default function App() {
     }
   }, [currentUser, userDb, alertThresholds, expenses, standingInstructions, bankScheduledTransactions, quickPayTemplates]);
 
-  // Update dynamic alerts whenever accounts, installments, or currency changes
+  // Update dynamic alerts whenever accounts, installments, currency, or timezone changes
   useEffect(() => {
     if (accounts.length > 0) {
-      const generated = generateAlerts(accounts, installments, settings.currency || 'MYR');
+      const generated = generateAlerts(accounts, installments, settings.currency || 'MYR', settings.timezone);
       setAlerts(generated);
     }
-  }, [accounts, installments, settings.currency]);
+  }, [accounts, installments, settings.currency, settings.timezone]);
 
   // Calculations
   const schedule = useMemo(
-    () => calculatePaymentSchedule(accounts, strategy, allocatedCash, settings.paycheckDates),
-    [accounts, strategy, allocatedCash, settings.paycheckDates]
+    () => calculatePaymentSchedule(accounts, strategy, allocatedCash, settings.paycheckDates, settings.timezone),
+    [accounts, strategy, allocatedCash, settings.paycheckDates, settings.timezone]
   );
 
   const projections = useMemo(
-    () => projectMonthlyCashFlow(accounts, installments, settings.monthlyIncome, 6),
-    [accounts, installments, settings.monthlyIncome]
+    () => projectMonthlyCashFlow(accounts, installments, settings.monthlyIncome, 6, settings.timezone),
+    [accounts, installments, settings.monthlyIncome, settings.timezone]
   );
 
   // User Authenticated Handler
