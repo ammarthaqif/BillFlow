@@ -2432,9 +2432,14 @@ export default function App() {
           setSelectedBankAccountIdForUpdate(undefined);
         }}
         accounts={accounts}
+        bankAccounts={accounts.filter((a) => a.type === 'bank_account')}
         currency={settings.currency || 'MYR'}
         selectedAccountId={selectedBankAccountIdForUpdate}
         onUpdateBalance={handleUpdateBankBalance}
+        onOpenAddAccount={() => {
+          setIsUpdateBankBalanceOpen(false);
+          setIsConnectBankOpen(true);
+        }}
       />
 
       {/* Account Specific Transactions & Settlement Manager */}

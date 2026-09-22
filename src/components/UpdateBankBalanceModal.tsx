@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   X, 
@@ -10,7 +10,8 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  Plus
 } from 'lucide-react';
 import { BillAccount } from '../types';
 import { formatCurrency, CurrencyCode, getCurrencyConfig } from '../utils/currency';
@@ -18,30 +19,93 @@ import { formatCurrency, CurrencyCode, getCurrencyConfig } from '../utils/curren
 interface UpdateBankBalanceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  bankAccounts: BillAccount[];
+  bankAccounts?: BillAccount[];
+  accounts?: BillAccount[];
   selectedAccountId?: string;
   onUpdateBalance: (accountId: string, newBalance: number, details?: Partial<BillAccount>) => void;
   currency?: CurrencyCode | string;
+  onOpenAddAccount?: () => void;
 }
 
 export const UpdateBankBalanceModal: React.FC<UpdateBankBalanceModalProps> = ({
   isOpen,
   onClose,
-  bankAccounts = [],
+  bankAccounts,
+  accounts,
   selectedAccountId,
   onUpdateBalance,
   currency = 'MYR',
+  onOpenAddAccount,
 }) => {
   const currencyConfig = getCurrencyConfig(currency);
 
+  // Robust resolution of bank/savings accounts
+  const resolvedBankAccounts = useMemo(() => {
+    // Collect all candidate accounts
+    const candidates: BillAccount[] = [];
+    if (bankAccounts && Array.isArray(bankAccounts) && bankAccounts.length > 0) {
+      candidates.push(...bankAccounts);
+    } else if (accounts && Array.isArray(accounts) && accounts.length > 0) {
+      candidates.push(...accounts);
+    }
+
+    if (candidates.length === 0) return [];
+
+    // Filter 1: Strict bank_account type
+    const byType = candidates.filter((a) => a.type === 'bank_account');
+    if (byType.length > 0) {
+      return byType;
+    }
+
+    // Filter 2: If a specific account was targeted by selectedAccountId
+    if (selectedAccountId) {
+      const target = candidates.find((a) => a.id === selectedAccountId);
+      if (target) return [target];
+    }
+
+    // Filter 3: Name / Institution heuristics for savings, current, bank accounts
+    const byKeywords = candidates.filter((a) => {
+      const n = (a.name || '').toLowerCase();
+      const inst = (a.institution || '').toLowerCase();
+      return (
+        n.includes('saving') ||
+        n.includes('current') ||
+        n.includes('simpanan') ||
+        n.includes('semasa') ||
+        n.includes('bank') ||
+        inst.includes('saving') ||
+        inst.includes('bank') ||
+        inst.includes('maybank') ||
+        inst.includes('cimb') ||
+        inst.includes('rhb') ||
+        inst.includes('public') ||
+        inst.includes('hong leong') ||
+        inst.includes('ambank') ||
+        inst.includes('affin') ||
+        inst.includes('islam') ||
+        inst.includes('bsn') ||
+        inst.includes('uob') ||
+        inst.includes('ocbc') ||
+        inst.includes('hsbc') ||
+        inst.includes('standard chartered')
+      );
+    });
+    if (byKeywords.length > 0) {
+      return byKeywords;
+    }
+
+    // Filter 4: Fallback to all candidates if nothing else matches so user is never blocked
+    return candidates;
+  }, [bankAccounts, accounts, selectedAccountId]);
+
   const [activeAccountId, setActiveAccountId] = useState<string>(() => {
-    if (selectedAccountId && bankAccounts.some((b) => b.id === selectedAccountId)) {
+    if (selectedAccountId && resolvedBankAccounts.some((b) => b.id === selectedAccountId)) {
       return selectedAccountId;
     }
-    return bankAccounts[0]?.id || '';
+    return resolvedBankAccounts[0]?.id || '';
   });
 
-  const currentAccount = bankAccounts.find((b) => b.id === activeAccountId) || bankAccounts[0];
+  const currentAccount = resolvedBankAccounts.find((b) => b.id === activeAccountId) || resolvedBankAccounts[0];
 
   // Mode: 'set' (direct balance input), 'deposit' (add funds), 'withdraw' (deduct funds)
   const [mode, setMode] = useState<'set' | 'deposit' | 'withdraw'>('set');
@@ -52,6 +116,15 @@ export const UpdateBankBalanceModal: React.FC<UpdateBankBalanceModalProps> = ({
   const [accountMask, setAccountMask] = useState<string>('');
   const [showDetailsEdit, setShowDetailsEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sync active account when selectedAccountId or resolvedBankAccounts change
+  useEffect(() => {
+    if (selectedAccountId && resolvedBankAccounts.some((b) => b.id === selectedAccountId)) {
+      setActiveAccountId(selectedAccountId);
+    } else if (resolvedBankAccounts.length > 0 && !resolvedBankAccounts.some((b) => b.id === activeAccountId)) {
+      setActiveAccountId(resolvedBankAccounts[0].id);
+    }
+  }, [selectedAccountId, resolvedBankAccounts]);
 
   // Sync state when active account changes
   useEffect(() => {
@@ -64,31 +137,43 @@ export const UpdateBankBalanceModal: React.FC<UpdateBankBalanceModalProps> = ({
     }
   }, [activeAccountId, currentAccount]);
 
-  useEffect(() => {
-    if (selectedAccountId && bankAccounts.some((b) => b.id === selectedAccountId)) {
-      setActiveAccountId(selectedAccountId);
-    }
-  }, [selectedAccountId, bankAccounts]);
-
   if (!isOpen) return null;
 
-  if (bankAccounts.length === 0) {
+  if (resolvedBankAccounts.length === 0) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-        <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 max-w-md w-full shadow-2xl text-center space-y-4">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
-            <AlertCircle className="w-6 h-6" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+        <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl text-center space-y-4 relative overflow-hidden">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto shadow-inner">
+            <Building2 className="w-7 h-7" />
           </div>
-          <h3 className="text-lg font-bold text-white">No Bank Accounts Found</h3>
-          <p className="text-xs text-slate-400">
-            Please link a bank account (e.g. Maybank Savings, CIMB Current) first to update its available liquid balance.
-          </p>
-          <button
-            onClick={onClose}
-            className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
-          >
-            Close
-          </button>
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-white">No Bank Accounts Found</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Link a savings or current account (e.g. Maybank, CIMB, Public Bank) to track available liquid cash reserves and settlement safety.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 pt-2">
+            {onOpenAddAccount && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenAddAccount();
+                }}
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-2 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Link Bank Account Now</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -161,13 +246,13 @@ export const UpdateBankBalanceModal: React.FC<UpdateBankBalanceModalProps> = ({
 
         <form onSubmit={handleSave} className="space-y-4">
           {/* Account Selector if multiple */}
-          {bankAccounts.length > 1 && (
+          {resolvedBankAccounts.length > 1 && (
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                 Select Bank Account
               </label>
               <div className="grid grid-cols-2 gap-2">
-                {bankAccounts.map((acc) => (
+                {resolvedBankAccounts.map((acc) => (
                   <button
                     key={acc.id}
                     type="button"
