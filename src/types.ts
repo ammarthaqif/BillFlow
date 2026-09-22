@@ -493,10 +493,75 @@ export interface UserDedicatedDatabase {
   standingInstructions?: StandingInstruction[];
   bankScheduledTransactions?: BankScheduledTransaction[];
   quickPayTemplates?: QuickPayTemplate[];
+  utilityBills?: UtilityBillItem[];
   settings: UserSettings;
   paidScheduleIds: string[];
   scheduledScheduleIds: string[];
   alertThresholds: number[];
+}
+
+export type UtilityBillStatus = 'pending' | 'scheduled' | 'paid';
+
+export interface UtilityBillItem {
+  id: string;
+  billerName: string; // e.g. "TNB Electricity", "Air Selangor Water", "Unifi Home Broadband"
+  category: ExpenseCategory;
+  amount: number;
+  dueDate: string; // YYYY-MM-DD
+  accountNumber?: string;
+  jompayBillerCode?: string;
+  jompayRef1?: string;
+  status: UtilityBillStatus;
+  paidDate?: string;
+  paidAccountId?: string;
+  paidAccountName?: string;
+  paidAmount?: number;
+  notes?: string;
+  ownerName?: string;
+  ownerRole?: FamilyRole | 'joint' | 'self' | 'family';
+  createdAt: string;
+}
+
+export interface UtilityBillRecommendation {
+  billId: string;
+  billName: string;
+  category: ExpenseCategory;
+  amount: number;
+  dueDate: string;
+  daysRemaining: number;
+  recommendedAccountId: string;
+  recommendedAccountName: string;
+  recommendedAccountType: AccountType;
+  recommendedAccountColor: string;
+  recommendedPayDate: string; // YYYY-MM-DD
+  recommendedPayDayOfWeek: string; // e.g. "Saturday"
+  floatDaysGained: number; // e.g. 52 days
+  statementCutoffDate: string; // YYYY-MM-DD
+  statementDueDate: string; // YYYY-MM-DD
+  projectedBenefit: {
+    type: BenefitType;
+    title: string;
+    ratePercent?: number;
+    monetaryValue: number;
+    unitDescription: string;
+    description: string;
+  };
+  bankInterestEarnedEstimate: number; // Est. interest from keeping cash in high-yield bank
+  totalAdvantageValue: number; // monetaryValue + bankInterestEarnedEstimate
+  reasons: string[];
+  runnerUp?: {
+    accountId: string;
+    accountName: string;
+    accountType: AccountType;
+    color: string;
+    floatDays: number;
+    benefitValue: number;
+    benefitTitle: string;
+    reason: string;
+  };
+  acceptanceTips: string;
+  availableCredit: number;
+  isCreditAdequate: boolean;
 }
 
 export interface FamilySyncPackage {
@@ -517,6 +582,7 @@ export interface FamilySyncPackage {
     installments: InstallmentPlan[];
     expenses?: ExpenseItem[];
     quickPayTemplates?: QuickPayTemplate[];
+    utilityBills?: UtilityBillItem[];
     settings?: Partial<UserSettings>;
   };
   summary: {
@@ -547,6 +613,7 @@ export interface DatabaseBackupPackage {
     expenses: ExpenseItem[];
     standingInstructions?: StandingInstruction[];
     quickPayTemplates?: QuickPayTemplate[];
+    utilityBills?: UtilityBillItem[];
     settings?: UserSettings;
     paidScheduleIds?: string[];
     scheduledScheduleIds?: string[];

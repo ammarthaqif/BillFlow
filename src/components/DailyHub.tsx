@@ -37,11 +37,18 @@ import {
   UserSettings, 
   ExpenseCategory,
   SettlementMethod,
-  QuickPayTemplate
+  QuickPayTemplate,
+  UtilityBillItem
 } from '../types';
 import { CurrencyCode, formatCurrency, getCurrencyConfig } from '../utils/currency';
 import { renderAccountIcon, getAccountTypeLabel, getExpenseCategoryIcon } from '../utils/accountUtils';
 import { QuickPayStrip } from './QuickPayStrip';
+import { 
+  getTodayDateStr, 
+  getTodayDayOfMonth, 
+  getTimezoneDisplayInfo,
+  parseDateOnly 
+} from '../utils/timezone';
 
 interface DailyHubProps {
   accounts: BillAccount[];
@@ -52,6 +59,7 @@ interface DailyHubProps {
   settings?: UserSettings;
   currency: CurrencyCode;
   quickPayTemplates?: QuickPayTemplate[];
+  utilityBills?: UtilityBillItem[];
   onSelectQuickPayForPay?: (template: QuickPayTemplate) => void;
   onOpenManageQuickPay?: () => void;
   onOpenCreateQuickPay?: () => void;
@@ -78,7 +86,7 @@ interface DailyHubProps {
   ) => void;
   onBatchSettleUnsettled?: (expenseIds: string[]) => void;
   onClearUnsettledSwipes?: () => void;
-  onSwitchTab?: (tab: 'today' | 'overview' | 'strategy' | 'expenses' | 'accounts') => void;
+  onSwitchTab?: (tab: 'today' | 'overview' | 'strategy' | 'expenses' | 'accounts' | 'utilities') => void;
   onDeleteExpense?: (expenseId: string) => void;
 }
 
@@ -91,6 +99,7 @@ export const DailyHub: React.FC<DailyHubProps> = ({
   settings,
   currency,
   quickPayTemplates = [],
+  utilityBills = [],
   onSelectQuickPayForPay,
   onOpenManageQuickPay,
   onOpenCreateQuickPay,
@@ -117,8 +126,10 @@ export const DailyHub: React.FC<DailyHubProps> = ({
       return () => clearTimeout(timer);
     }
   }, [confirmDeleteId]);
-  const today = new Date();
-  const currentDay = today.getDate();
+  const tz = settings?.timezone;
+  const todayDateStr = useMemo(() => getTodayDateStr(tz), [tz]);
+  const currentDay = useMemo(() => getTodayDayOfMonth(tz), [tz]);
+  const tzInfo = useMemo(() => getTimezoneDisplayInfo(tz), [tz]);
 
   // Inline Quick Log Form State
   const [quickAmount, setQuickAmount] = useState<string>('');
@@ -138,36 +149,34 @@ export const DailyHub: React.FC<DailyHubProps> = ({
     try {
       const stored = localStorage.getItem('billflow_daily_streak');
       const lastVisit = localStorage.getItem('billflow_last_visit_date');
-      const todayStr = today.toISOString().split('T')[0];
 
       if (!stored || !lastVisit) {
         localStorage.setItem('billflow_daily_streak', '3');
-        localStorage.setItem('billflow_last_visit_date', todayStr);
+        localStorage.setItem('billflow_last_visit_date', todayDateStr);
         return 3;
       }
 
-      if (lastVisit === todayStr) {
+      if (lastVisit === todayDateStr) {
         return parseInt(stored, 10) || 3;
       }
 
-      const lastDate = new Date(lastVisit);
-      const diffTime = Math.abs(today.getTime() - lastDate.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const diffMs = parseDateOnly(todayDateStr) - parseDateOnly(lastVisit);
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
       if (diffDays === 1) {
         const next = (parseInt(stored, 10) || 1) + 1;
         localStorage.setItem('billflow_daily_streak', next.toString());
-        localStorage.setItem('billflow_last_visit_date', todayStr);
+        localStorage.setItem('billflow_last_visit_date', todayDateStr);
         return next;
       } else {
         localStorage.setItem('billflow_daily_streak', '1');
-        localStorage.setItem('billflow_last_visit_date', todayStr);
+        localStorage.setItem('billflow_last_visit_date', todayDateStr);
         return 1;
       }
     } catch {
       return 3;
     }
-  }, []);
+  }, [todayDateStr]);
 
   // Compute "Best Card to Swipe Today" based on cycle cutoffs & grace days
   const cardRecommendations = useMemo(() => {
@@ -210,8 +219,7 @@ export const DailyHub: React.FC<DailyHubProps> = ({
     });
   }, [schedule]);
 
-  // Today's logged expenses
-  const todayDateStr = today.toISOString().split('T')[0];
+  // Today's logged expenses (filtered by user's timezone date)
   const todayExpenses = useMemo(() => {
     return expenses.filter((e) => e.date === todayDateStr);
   }, [expenses, todayDateStr]);
@@ -255,6 +263,15 @@ export const DailyHub: React.FC<DailyHubProps> = ({
 
   const primaryBank = (settings?.primaryBankAccountId ? accounts.find((a) => a.id === settings.primaryBankAccountId) : null) || accounts.find((a) => a.type === 'bank_account');
 
+  // Pending Utility Bills for Payment Advisor
+  const pendingUtilityBills = useMemo(() => {
+    return utilityBills.filter((b) => b.status !== 'paid');
+  }, [utilityBills]);
+
+  const totalPendingUtilityAmount = useMemo(() => {
+    return pendingUtilityBills.reduce((sum, b) => sum + (b.amount || 0), 0);
+  }, [pendingUtilityBills]);
+
   return (
     <div className="space-y-6">
       {/* 1. DAILY BRIEFING & STREAK BANNER */}
@@ -263,7 +280,7 @@ export const DailyHub: React.FC<DailyHubProps> = ({
         <div className="lg:col-span-2 bg-gradient-to-br from-indigo-950/80 via-slate-900 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="p-1 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                   <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
                 </span>
@@ -271,8 +288,11 @@ export const DailyHub: React.FC<DailyHubProps> = ({
                   Daily Float Intelligence
                 </span>
                 <span className="text-slate-500 text-xs">•</span>
-                <span className="text-xs text-slate-400 font-medium">
-                  {today.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                <span className="text-xs text-slate-300 font-medium">
+                  {tzInfo.currentDate}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-indigo-300 font-mono">
+                  {tzInfo.offset}
                 </span>
               </div>
               <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
@@ -592,6 +612,47 @@ export const DailyHub: React.FC<DailyHubProps> = ({
         onOpenCreate={() => onOpenCreateQuickPay?.()}
       />
 
+      {/* UTILITY BILLS & SPAYLATER ROUTING STRIP */}
+      {utilityBills.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-950/40 via-indigo-950/40 to-slate-900 border border-amber-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-white shrink-0 shadow-md shadow-amber-500/25">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-bold text-white">Monthly Utility Bills & Payment Advisor</h4>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {pendingUtilityBills.length} Pending
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Maximize interest-free periods (up to 55 days float) and cashback on TNB, Water, Telco & Internet bills using cards or SPayLater.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+            {pendingUtilityBills.length > 0 && (
+              <div className="text-right hidden md:block">
+                <span className="text-[10px] text-slate-400 block">Pending Total</span>
+                <span className="text-xs font-mono font-bold text-amber-400">
+                  {formatCurrency(totalPendingUtilityAmount, currency)}
+                </span>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => onSwitchTab?.('utilities')}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/20 cursor-pointer whitespace-nowrap"
+            >
+              <span>Advise & Route Bills</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 3. TODAY'S ACTION CHECKLIST & RECENT SWIPES (2-COLUMN GRID) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Column 1: Action Checklist - Due Soon or Need Attention */}
@@ -624,8 +685,14 @@ export const DailyHub: React.FC<DailyHubProps> = ({
                     </div>
                     <div>
                       <div className="font-bold text-white">{item.accountName}</div>
-                      <div className="text-[11px] text-amber-400 font-medium">
-                        Due in {item.daysRemaining} day{item.daysRemaining === 1 ? '' : 's'} ({item.dueDate})
+                      <div className={`text-[11px] font-medium ${item.daysRemaining < 0 ? 'text-rose-400 font-bold' : item.daysRemaining <= 2 ? 'text-rose-300' : 'text-amber-400'}`}>
+                        {item.daysRemaining < 0
+                          ? `${Math.abs(item.daysRemaining)} day${Math.abs(item.daysRemaining) === 1 ? '' : 's'} overdue (${item.dueDate})`
+                          : item.daysRemaining === 0
+                          ? `Due Today (${item.dueDate})`
+                          : item.daysRemaining === 1
+                          ? `Due Tomorrow (${item.dueDate})`
+                          : `Due in ${item.daysRemaining} days (${item.dueDate})`}
                       </div>
                     </div>
                   </div>

@@ -373,7 +373,13 @@ export const PaymentOptimizerMatrix: React.FC<PaymentOptimizerMatrixProps> = ({
                         {item.urgency === 'critical' && !isPaid && (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" />
-                            Due in {item.daysRemaining}d
+                            {item.daysRemaining < 0
+                              ? `${Math.abs(item.daysRemaining)}d overdue`
+                              : item.daysRemaining === 0
+                              ? 'Due today'
+                              : item.daysRemaining === 1
+                              ? 'Due tomorrow'
+                              : `Due in ${item.daysRemaining}d`}
                           </span>
                         )}
                       </div>

@@ -16,12 +16,19 @@ import {
   Filter,
   FileText,
   RefreshCw,
-  HardDrive
+  HardDrive,
+  Globe,
+  Clock
 } from 'lucide-react';
 import { UserSettings, BillAccount, ExpenseItem, UserProfile, UserDedicatedDatabase } from '../types';
 import { formatCurrency, CurrencyCode } from '../utils/currency';
 import { downloadTransactionsCSV, computeCSVStats, CSVExportOptions } from '../utils/csvExport';
 import { UserDatabaseService } from '../services/userDatabaseService';
+import { 
+  COMMON_TIMEZONES, 
+  getTimezoneDisplayInfo, 
+  getUserTimezone 
+} from '../utils/timezone';
 
 export interface IncomeSettingsModalProps {
   isOpen: boolean;
@@ -72,6 +79,7 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
   const [primaryBankId, setPrimaryBankId] = useState<string>(settings.primaryBankAccountId ?? (bankAccounts[0]?.id ?? ''));
   const [safetyBufferInput, setSafetyBufferInput] = useState<string>(settings.safetyBufferAmount?.toString() ?? '300');
   const [spendingCapInput, setSpendingCapInput] = useState<string>(settings.monthlySpendingCap?.toString() ?? '5000');
+  const [userTimezone, setUserTimezone] = useState<string>(settings.timezone || 'Asia/Kuala_Lumpur');
 
   // CSV Export Filter States
   const [csvStatusFilter, setCsvStatusFilter] = useState<'all' | 'settled' | 'unsettled'>('all');
@@ -96,6 +104,7 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
       setPrimaryBankId(settings.primaryBankAccountId ?? (bankAccounts[0]?.id ?? ''));
       setSafetyBufferInput(settings.safetyBufferAmount?.toString() ?? '300');
       setSpendingCapInput(settings.monthlySpendingCap?.toString() ?? '5000');
+      setUserTimezone(settings.timezone || getUserTimezone(settings));
       setCsvExportSuccess(null);
       setBackupExportSuccess(null);
       setUploadedBackupPayload(null);
@@ -153,6 +162,7 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
   const handleSaveSalarySettings = () => {
     const updated: UserSettings = {
       ...settings,
+      timezone: userTimezone,
       monthlyIncome: numericIncome,
       paycheckSchedule: schedule,
       paycheckDates: paycheckDates.length > 0 ? paycheckDates : [1, 15],
@@ -573,6 +583,62 @@ export const IncomeSettingsModal: React.FC<IncomeSettingsModalProps> = ({
                 />
                 <p className="text-[11px] text-slate-400">
                   Visualized on Executive Overview to track total monthly expenditures against your budget target.
+                </p>
+              </div>
+
+              {/* User Timezone & Deadline Synchronization */}
+              <div className="space-y-3 pt-3 border-t border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>User Timezone & Deadline Synchronization</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setUserTimezone(getUserTimezone())}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                  >
+                    Auto-Detect Browser
+                  </button>
+                </div>
+
+                <select
+                  value={userTimezone}
+                  onChange={(e) => setUserTimezone(e.target.value)}
+                  className="w-full bg-slate-800/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white font-medium focus:outline-none focus:border-indigo-500 transition-colors"
+                >
+                  {COMMON_TIMEZONES.map((tz) => (
+                    <option key={tz.value} value={tz.value}>
+                      {tz.label} ({tz.offset})
+                    </option>
+                  ))}
+                </select>
+
+                {/* Live Status Preview */}
+                {(() => {
+                  const tzInfo = getTimezoneDisplayInfo(userTimezone);
+                  return (
+                    <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="w-4 h-4 text-indigo-400 shrink-0" />
+                        <div>
+                          <div className="text-slate-200 font-medium">
+                            Today in {tzInfo.name}: <span className="font-bold text-white">{tzInfo.currentDate}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            Current Local Time: <span className="font-mono text-indigo-300 font-semibold">{tzInfo.currentTime}</span> ({tzInfo.offset})
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-semibold border border-indigo-500/30">
+                        Synchronized
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Upcoming deadlines, statement cutoffs, float intelligence, payment countdowns, and daily streaks strictly adhere to your selected timezone.
                 </p>
               </div>
             </div>

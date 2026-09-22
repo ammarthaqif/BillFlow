@@ -13,7 +13,8 @@ import {
   StandingInstruction,
   BankScheduledTransaction,
   ProPaymentRecord,
-  QuickPayTemplate
+  QuickPayTemplate,
+  UtilityBillItem
 } from './types';
 import { 
   INITIAL_ACCOUNTS, 
@@ -22,7 +23,8 @@ import {
   INITIAL_EXPENSES,
   INITIAL_STANDING_INSTRUCTIONS,
   INITIAL_BANK_SCHEDULED_TRANSACTIONS,
-  INITIAL_QUICK_PAY_TEMPLATES
+  INITIAL_QUICK_PAY_TEMPLATES,
+  INITIAL_UTILITY_BILLS
 } from './data/seedData';
 import { 
   calculatePaymentSchedule, 
@@ -33,6 +35,7 @@ import { UserDatabaseService } from './services/userDatabaseService';
 import { formatCurrency } from './utils/currency';
 import { renderAccountIcon, getAccountTypeLabel, calculateInterestSavedEstimate } from './utils/accountUtils';
 import { processDueRecurringExpenses, forceGenerateNextRecurringMonth } from './utils/recurringExpenses';
+import { getTodayDateStr } from './utils/timezone';
 
 // Subcomponents
 import { Navbar } from './components/Navbar';
@@ -61,6 +64,7 @@ import { ExpenseModal } from './components/ExpenseModal';
 import { QuickPayExecuteModal } from './components/QuickPayExecuteModal';
 import { QuickPayManageModal } from './components/QuickPayManageModal';
 import { DatabaseResetModal } from './components/DatabaseResetModal';
+import { UtilityBillOptimizer } from './components/UtilityBillOptimizer';
 
 import { 
   Sliders, 
@@ -113,7 +117,7 @@ export default function App() {
   const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
   // Active view tab (default to 'today' for daily engagement & zero friction)
-  const [activeTab, setActiveTab] = useState<'today' | 'overview' | 'strategy' | 'expenses' | 'accounts' | 'optimizer' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'standing_instructions'>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'overview' | 'strategy' | 'expenses' | 'accounts' | 'optimizer' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'standing_instructions' | 'utilities'>('today');
   const [isOverviewExpandedOnToday, setIsOverviewExpandedOnToday] = useState(false);
   // Accounts sub-tab: 'cards' or 'standing_instructions'
   const [accountsSubTab, setAccountsSubTab] = useState<'cards' | 'standing_instructions'>('cards');
@@ -125,6 +129,9 @@ export default function App() {
   // Paid & Scheduled state sets
   const [paidScheduleIds, setPaidScheduleIds] = useState<Set<string>>(new Set());
   const [scheduledScheduleIds, setScheduledScheduleIds] = useState<Set<string>>(new Set());
+
+  // Utility Bills State (for Intelligent Payment Advisor)
+  const [utilityBills, setUtilityBills] = useState<UtilityBillItem[]>(INITIAL_UTILITY_BILLS);
 
   // Alerts
   const [alerts, setAlerts] = useState<CustomAlert[]>([]);
@@ -207,6 +214,11 @@ export default function App() {
           ? db.quickPayTemplates
           : INITIAL_QUICK_PAY_TEMPLATES
       );
+      setUtilityBills(
+        db.utilityBills && Array.isArray(db.utilityBills)
+          ? db.utilityBills
+          : INITIAL_UTILITY_BILLS
+      );
       setAutoSaveStatus(generatedCount > 0 ? `Auto-generated ${generatedCount} bills` : 'Loaded');
 
       if (generatedCount > 0) {
@@ -238,7 +250,8 @@ export default function App() {
     updatedExpenses?: ExpenseItem[],
     updatedStandingInstructions?: StandingInstruction[],
     updatedBankScheduledTransactions?: BankScheduledTransaction[],
-    updatedQuickPayTemplates?: QuickPayTemplate[]
+    updatedQuickPayTemplates?: QuickPayTemplate[],
+    updatedUtilityBills?: UtilityBillItem[]
   ) => {
     if (!currentUser) return;
     setAutoSaveStatus('Saving...');
@@ -255,6 +268,7 @@ export default function App() {
         standingInstructions: updatedStandingInstructions || standingInstructions,
         bankScheduledTransactions: updatedBankScheduledTransactions || bankScheduledTransactions,
         quickPayTemplates: updatedQuickPayTemplates || quickPayTemplates,
+        utilityBills: updatedUtilityBills || utilityBills,
         settings: updatedSettings,
         paidScheduleIds: Array.from(updatedPaid),
         scheduledScheduleIds: Array.from(updatedScheduled),
@@ -267,7 +281,7 @@ export default function App() {
       console.error('Auto-save error:', err);
       setAutoSaveStatus('Local state active');
     }
-  }, [currentUser, userDb, alertThresholds, expenses, standingInstructions, bankScheduledTransactions, quickPayTemplates]);
+  }, [currentUser, userDb, alertThresholds, expenses, standingInstructions, bankScheduledTransactions, quickPayTemplates, utilityBills]);
 
   // Update dynamic alerts whenever accounts, installments, currency, or timezone changes
   useEffect(() => {
@@ -328,6 +342,11 @@ export default function App() {
         ? updatedDb.quickPayTemplates
         : []
     );
+    setUtilityBills(
+      updatedDb.utilityBills && Array.isArray(updatedDb.utilityBills)
+        ? updatedDb.utilityBills
+        : []
+    );
     setPaidScheduleIds(new Set(updatedDb.paidScheduleIds || []));
     setScheduledScheduleIds(new Set(updatedDb.scheduledScheduleIds || []));
     if (updatedDb?.settings) {
@@ -336,6 +355,144 @@ export default function App() {
       setStrategy(updatedDb.settings.defaultStrategy || 'grace_float');
     }
     setAutoSaveStatus('Synchronized');
+  };
+
+  // Utility Bill Advisor Handlers
+  const handleAddUtilityBill = (billData: Omit<UtilityBillItem, 'id' | 'createdAt'>) => {
+    const newBill: UtilityBillItem = {
+      ...billData,
+      id: `ub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+    };
+    const nextBills = [newBill, ...utilityBills];
+    setUtilityBills(nextBills);
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      bankScheduledTransactions,
+      quickPayTemplates,
+      nextBills
+    );
+    setAutoSaveStatus('Utility bill added');
+  };
+
+  const handleUpdateUtilityBill = (updatedBill: UtilityBillItem) => {
+    const nextBills = utilityBills.map((b) => (b.id === updatedBill.id ? updatedBill : b));
+    setUtilityBills(nextBills);
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      bankScheduledTransactions,
+      quickPayTemplates,
+      nextBills
+    );
+    setAutoSaveStatus('Utility bill updated');
+  };
+
+  const handleDeleteUtilityBill = (billId: string) => {
+    const nextBills = utilityBills.filter((b) => b.id !== billId);
+    setUtilityBills(nextBills);
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      standingInstructions,
+      bankScheduledTransactions,
+      quickPayTemplates,
+      nextBills
+    );
+    setAutoSaveStatus('Utility bill removed');
+  };
+
+  const handleExecuteUtilityBillPayment = (
+    bill: UtilityBillItem,
+    targetAccountId: string,
+    targetAccountName: string,
+    paidAmount: number
+  ) => {
+    const todayStr = getTodayDateStr(settings.timezone);
+
+    // 1. Mark bill as paid
+    const nextBills = utilityBills.map((b) => {
+      if (b.id === bill.id) {
+        return {
+          ...b,
+          status: 'paid' as const,
+          paidDate: todayStr,
+          paidAccountId: targetAccountId,
+          paidAccountName: targetAccountName,
+        };
+      }
+      return b;
+    });
+    setUtilityBills(nextBills);
+
+    // 2. Adjust account balance (if card or bnpl, increase totalBalance; if bank, deduct)
+    let nextAccounts = [...accounts];
+    const targetAccount = accounts.find((a) => a.id === targetAccountId);
+    if (targetAccount) {
+      nextAccounts = nextAccounts.map((a) => {
+        if (a.id === targetAccountId) {
+          if (a.type === 'bank_account') {
+            return {
+              ...a,
+              totalBalance: Math.max(0, Math.round(((a.totalBalance || 0) - paidAmount) * 100) / 100),
+            };
+          } else {
+            return {
+              ...a,
+              totalBalance: Math.round(((a.totalBalance || 0) + paidAmount) * 100) / 100,
+            };
+          }
+        }
+        return a;
+      });
+      setAccounts(nextAccounts);
+    }
+
+    // 3. Create expense transaction
+    const newExpense: ExpenseItem = {
+      id: `exp_ub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      accountId: targetAccountId,
+      accountName: targetAccountName,
+      accountType: targetAccount ? targetAccount.type : 'credit_card',
+      title: `${bill.billerName} (Utility)`,
+      amount: paidAmount,
+      date: todayStr,
+      category: bill.category || 'Utilities (Electricity, Water, IWK)',
+      status: 'unsettled',
+      notes: `Utility bill payment routed via ${targetAccountName}. Ref: ${bill.accountNumber || bill.jompayBillerCode || 'Online Bill'}`,
+    };
+    const nextExpenses = [newExpense, ...expenses];
+    setExpenses(nextExpenses);
+
+    // 4. Persist
+    triggerAutoSave(
+      nextAccounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      nextExpenses,
+      standingInstructions,
+      bankScheduledTransactions,
+      quickPayTemplates,
+      nextBills
+    );
+    setAutoSaveStatus(`Paid ${bill.billerName} via ${targetAccountName}`);
   };
 
   const handleDatabaseReset = (freshDb: UserDedicatedDatabase) => {
@@ -1512,6 +1669,25 @@ export default function App() {
                 {accounts.length}
               </span>
             </button>
+
+            {/* Tab: Utility & PayLater Advisor */}
+            <button
+              id="tab-utilities"
+              onClick={() => setActiveTab('utilities')}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'utilities'
+                  ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-md shadow-amber-600/25 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
+              }`}
+            >
+              <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Utility & SPayLater Advisor</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                activeTab === 'utilities' ? 'bg-white/20 text-white' : 'bg-amber-950/80 text-amber-300 border border-amber-500/30'
+              }`}>
+                {utilityBills.filter((b) => b.status !== 'paid').length}
+              </span>
+            </button>
           </div>
         </div>
 
@@ -1610,6 +1786,7 @@ export default function App() {
               settings={settings}
               currency={settings.currency || 'MYR'}
               quickPayTemplates={quickPayTemplates}
+              utilityBills={utilityBills}
               onSelectQuickPayForPay={(tpl) => {
                 setSelectedQuickPayTemplate(tpl);
                 setIsQuickPayExecuteOpen(true);
@@ -2095,6 +2272,21 @@ export default function App() {
               setIsEditAccountOpen(true);
             }}
             onForceGenerateRecurringCycle={handleForceGenerateRecurringCycle}
+          />
+        )}
+
+        {/* Tab 6: Utility Bills & SPayLater Optimizer */}
+        {activeTab === 'utilities' && (
+          <UtilityBillOptimizer
+            bills={utilityBills}
+            accounts={accounts}
+            settings={settings}
+            activeCurrency={settings.currency || 'MYR'}
+            onAddBill={handleAddUtilityBill}
+            onUpdateBill={handleUpdateUtilityBill}
+            onDeleteBill={handleDeleteUtilityBill}
+            onExecuteBillPayment={handleExecuteUtilityBillPayment}
+            onAddExpense={handleAddExpense}
           />
         )}
       </main>

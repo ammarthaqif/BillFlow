@@ -14,7 +14,8 @@ import {
   PartnerConnectionRequest,
   PartnerConnectionPermissions,
   QuickPayTemplate,
-  DatabaseBackupPackage
+  DatabaseBackupPackage,
+  UtilityBillItem
 } from '../types';
 import { 
   downloadTransactionsCSV, 
@@ -27,7 +28,8 @@ import {
   INITIAL_EXPENSES, 
   INITIAL_STANDING_INSTRUCTIONS, 
   INITIAL_BANK_SCHEDULED_TRANSACTIONS,
-  INITIAL_QUICK_PAY_TEMPLATES
+  INITIAL_QUICK_PAY_TEMPLATES,
+  INITIAL_UTILITY_BILLS
 } from '../data/seedData';
 
 const USERS_INDEX_KEY = 'billflow_registered_users';
@@ -887,6 +889,7 @@ export class UserDatabaseService {
       standingInstructions: initialStandingInstructions,
       bankScheduledTransactions: [...INITIAL_BANK_SCHEDULED_TRANSACTIONS],
       quickPayTemplates: [...INITIAL_QUICK_PAY_TEMPLATES],
+      utilityBills: [...INITIAL_UTILITY_BILLS],
       settings: { ...INITIAL_SETTINGS },
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -939,6 +942,9 @@ export class UserDatabaseService {
         if (!parsed.quickPayTemplates || !Array.isArray(parsed.quickPayTemplates)) {
           parsed.quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
         }
+        if (!parsed.utilityBills || !Array.isArray(parsed.utilityBills)) {
+          parsed.utilityBills = [...INITIAL_UTILITY_BILLS];
+        }
         return parsed;
       } catch (err) {
         console.warn('Error parsing user database from localStorage:', err);
@@ -962,6 +968,7 @@ export class UserDatabaseService {
       standingInstructions: INITIAL_STANDING_INSTRUCTIONS.slice(0, 2),
       bankScheduledTransactions: [...INITIAL_BANK_SCHEDULED_TRANSACTIONS],
       quickPayTemplates: [...INITIAL_QUICK_PAY_TEMPLATES],
+      utilityBills: [...INITIAL_UTILITY_BILLS],
       settings: INITIAL_SETTINGS,
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -1458,6 +1465,7 @@ export class UserDatabaseService {
         expenses: db.expenses || [],
         standingInstructions: db.standingInstructions || [],
         quickPayTemplates: db.quickPayTemplates || [],
+        utilityBills: db.utilityBills || [],
         settings: db.settings,
         paidScheduleIds: db.paidScheduleIds || [],
         scheduledScheduleIds: db.scheduledScheduleIds || [],
@@ -1518,6 +1526,7 @@ export class UserDatabaseService {
     expensesRestored: number;
     standingInstructionsRestored: number;
     quickPayTemplatesRestored: number;
+    utilityBillsRestored?: number;
     mode: 'replace' | 'merge';
     originFormat: string;
   } {
@@ -1534,6 +1543,7 @@ export class UserDatabaseService {
     let incomingExpenses: ExpenseItem[] = [];
     let incomingStandingInstructions: StandingInstruction[] = [];
     let incomingQuickPayTemplates: QuickPayTemplate[] = [];
+    let incomingUtilityBills: UtilityBillItem[] = [];
     let incomingSettings: UserSettings | undefined;
     let incomingPaidScheduleIds: string[] = [];
     let incomingScheduledScheduleIds: string[] = [];
@@ -1544,6 +1554,7 @@ export class UserDatabaseService {
       incomingExpenses = Array.isArray(backupPayload.data.expenses) ? backupPayload.data.expenses : [];
       incomingStandingInstructions = Array.isArray(backupPayload.data.standingInstructions) ? backupPayload.data.standingInstructions : [];
       incomingQuickPayTemplates = Array.isArray(backupPayload.data.quickPayTemplates) ? backupPayload.data.quickPayTemplates : [];
+      incomingUtilityBills = Array.isArray(backupPayload.data.utilityBills) ? backupPayload.data.utilityBills : [];
       incomingSettings = backupPayload.data.settings;
       incomingPaidScheduleIds = Array.isArray(backupPayload.data.paidScheduleIds) ? backupPayload.data.paidScheduleIds : [];
       incomingScheduledScheduleIds = Array.isArray(backupPayload.data.scheduledScheduleIds) ? backupPayload.data.scheduledScheduleIds : [];
@@ -1554,6 +1565,7 @@ export class UserDatabaseService {
       incomingExpenses = Array.isArray(backupPayload.expenses) ? backupPayload.expenses : [];
       incomingStandingInstructions = Array.isArray(backupPayload.standingInstructions) ? backupPayload.standingInstructions : [];
       incomingQuickPayTemplates = Array.isArray(backupPayload.quickPayTemplates) ? backupPayload.quickPayTemplates : [];
+      incomingUtilityBills = Array.isArray(backupPayload.utilityBills) ? backupPayload.utilityBills : [];
       incomingSettings = backupPayload.settings;
       incomingPaidScheduleIds = Array.isArray(backupPayload.paidScheduleIds) ? backupPayload.paidScheduleIds : [];
       incomingScheduledScheduleIds = Array.isArray(backupPayload.scheduledScheduleIds) ? backupPayload.scheduledScheduleIds : [];
@@ -1594,6 +1606,7 @@ export class UserDatabaseService {
         standingInstructions: incomingStandingInstructions,
         bankScheduledTransactions: currentDb.bankScheduledTransactions || [],
         quickPayTemplates: incomingQuickPayTemplates.length > 0 ? incomingQuickPayTemplates : (currentDb.quickPayTemplates || []),
+        utilityBills: incomingUtilityBills.length > 0 ? incomingUtilityBills : (currentDb.utilityBills || []),
         settings: incomingSettings ? { ...currentDb.settings, ...incomingSettings } : currentDb.settings,
         paidScheduleIds: incomingPaidScheduleIds,
         scheduledScheduleIds: incomingScheduledScheduleIds,
@@ -1608,6 +1621,7 @@ export class UserDatabaseService {
         expensesRestored: (updatedDb.expenses || []).length,
         standingInstructionsRestored: (updatedDb.standingInstructions || []).length,
         quickPayTemplatesRestored: (updatedDb.quickPayTemplates || []).length,
+        utilityBillsRestored: (updatedDb.utilityBills || []).length,
         mode: 'replace',
         originFormat: format,
       };
@@ -1686,6 +1700,18 @@ export class UserDatabaseService {
       }
     }
 
+    const existingUbIds = new Set((currentDb.utilityBills || []).map((u) => u.id));
+    const mergedUtilityBills: UtilityBillItem[] = [...(currentDb.utilityBills || [])];
+    let ubAdded = 0;
+
+    for (const inUb of incomingUtilityBills) {
+      if (!existingUbIds.has(inUb.id)) {
+        mergedUtilityBills.push(inUb);
+        existingUbIds.add(inUb.id);
+        ubAdded++;
+      }
+    }
+
     const updatedDb: UserDedicatedDatabase = {
       ...currentDb,
       householdId: targetHId,
@@ -1697,6 +1723,7 @@ export class UserDatabaseService {
       expenses: mergedExpenses,
       standingInstructions: mergedStandingInstructions,
       quickPayTemplates: mergedTemplates,
+      utilityBills: mergedUtilityBills,
       settings: incomingSettings ? { ...currentDb.settings, ...incomingSettings } : currentDb.settings,
     };
 
@@ -1709,6 +1736,7 @@ export class UserDatabaseService {
       expensesRestored: expensesAdded,
       standingInstructionsRestored: siAdded,
       quickPayTemplatesRestored: tplAdded,
+      utilityBillsRestored: ubAdded,
       mode: 'merge',
       originFormat: format,
     };
