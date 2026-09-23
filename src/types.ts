@@ -490,6 +490,8 @@ export interface UserDedicatedDatabase {
   accounts: BillAccount[];
   installments: InstallmentPlan[];
   expenses?: ExpenseItem[];
+  deletedExpenseIds?: string[];
+  dismissedRecurringKeys?: string[];
   standingInstructions?: StandingInstruction[];
   bankScheduledTransactions?: BankScheduledTransaction[];
   quickPayTemplates?: QuickPayTemplate[];

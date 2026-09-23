@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   BillAccount, 
   InstallmentPlan, 
@@ -109,6 +109,21 @@ export default function App() {
   const [installments, setInstallments] = useState<InstallmentPlan[]>(INITIAL_INSTALLMENTS);
   // State: Expenses & Purchases
   const [expenses, setExpenses] = useState<ExpenseItem[]>(INITIAL_EXPENSES);
+  // Track permanently deleted expenses & dismissed recurring cycles to prevent resurrection
+  const [deletedExpenseIds, setDeletedExpenseIds] = useState<string[]>([]);
+  const [dismissedRecurringKeys, setDismissedRecurringKeys] = useState<string[]>([]);
+
+  // Synchronous refs to prevent stale closure data in auto-save operations
+  const expensesRef = useRef<ExpenseItem[]>(expenses);
+  expensesRef.current = expenses;
+  const accountsRef = useRef<BillAccount[]>(accounts);
+  accountsRef.current = accounts;
+  const installmentsRef = useRef<InstallmentPlan[]>(installments);
+  installmentsRef.current = installments;
+  const deletedExpenseIdsRef = useRef<string[]>(deletedExpenseIds);
+  deletedExpenseIdsRef.current = deletedExpenseIds;
+  const dismissedRecurringKeysRef = useRef<string[]>(dismissedRecurringKeys);
+  dismissedRecurringKeysRef.current = dismissedRecurringKeys;
   // State: Standing Instructions & Scheduled Payments
   const [standingInstructions, setStandingInstructions] = useState<StandingInstruction[]>(INITIAL_STANDING_INSTRUCTIONS);
   // State: Bank Scheduled Transactions
@@ -140,6 +155,26 @@ export default function App() {
   // Universal Quick Add Modal
   const [isUniversalQuickAddOpen, setIsUniversalQuickAddOpen] = useState(false);
   const [universalQuickAddInitialTab, setUniversalQuickAddInitialTab] = useState<'expense' | 'bank_balance' | 'account' | 'recurring'>('expense');
+
+  // Subtle Scroll-to-Top button state
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const tabEl = document.getElementById('tab-today-hub');
+      if (tabEl) {
+        const rect = tabEl.getBoundingClientRect();
+        // Visible when scrolled past the top sticky navigation header
+        setShowScrollTop(rect.top <= 75 || window.scrollY > 160);
+      } else {
+        setShowScrollTop(window.scrollY > 180);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Modals
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
@@ -186,15 +221,38 @@ export default function App() {
     try {
       const db = UserDatabaseService.loadUserDatabase(user.id);
       const loadedAccounts = db.accounts || [];
-      const rawExpenses = db.expenses && db.expenses.length > 0 ? db.expenses : INITIAL_EXPENSES;
+      const dbDeletedIds = db.deletedExpenseIds || [];
+      const dbDismissedKeys = db.dismissedRecurringKeys || [];
+      const deletedIdsSet = new Set(dbDeletedIds);
 
-      // Check and automatically generate monthly recurring expenses due today or past-due
-      const { updatedExpenses, updatedAccounts, generatedCount } = processDueRecurringExpenses(rawExpenses, loadedAccounts);
+      // CRITICAL FIX: Only fallback to INITIAL_EXPENSES if db.expenses is NOT an array (first run ever).
+      // An empty array [] means the user intentionally deleted all expenses, and must NEVER be overwritten!
+      const rawExpenses = Array.isArray(db.expenses)
+        ? db.expenses.filter((e) => !deletedIdsSet.has(e.id))
+        : INITIAL_EXPENSES.filter((e) => !deletedIdsSet.has(e.id));
+
+      // Check and automatically generate monthly recurring expenses due today or past-due,
+      // strictly respecting dismissed recurring keys and deleted expense IDs
+      const { updatedExpenses, updatedAccounts, generatedCount } = processDueRecurringExpenses(
+        rawExpenses,
+        loadedAccounts,
+        new Date(),
+        dbDismissedKeys,
+        dbDeletedIds
+      );
+
+      setDeletedExpenseIds(dbDeletedIds);
+      deletedExpenseIdsRef.current = dbDeletedIds;
+      setDismissedRecurringKeys(dbDismissedKeys);
+      dismissedRecurringKeysRef.current = dbDismissedKeys;
 
       setUserDb(db);
       setAccounts(updatedAccounts);
+      accountsRef.current = updatedAccounts;
       setInstallments(db.installments || []);
+      installmentsRef.current = db.installments || [];
       setExpenses(updatedExpenses);
+      expensesRef.current = updatedExpenses;
       setStandingInstructions(db.standingInstructions && db.standingInstructions.length > 0 ? db.standingInstructions : INITIAL_STANDING_INSTRUCTIONS);
       setBankScheduledTransactions(
         db.bankScheduledTransactions && db.bankScheduledTransactions.length > 0
@@ -230,6 +288,8 @@ export default function App() {
           ...db,
           accounts: updatedAccounts,
           expenses: updatedExpenses,
+          deletedExpenseIds: dbDeletedIds,
+          dismissedRecurringKeys: dbDismissedKeys,
         });
       }
     } catch (err) {
@@ -255,11 +315,17 @@ export default function App() {
     updatedStandingInstructions?: StandingInstruction[],
     updatedBankScheduledTransactions?: BankScheduledTransaction[],
     updatedQuickPayTemplates?: QuickPayTemplate[],
-    updatedUtilityBills?: UtilityBillItem[]
+    updatedUtilityBills?: UtilityBillItem[],
+    updatedDeletedExpenseIds?: string[],
+    updatedDismissedRecurringKeys?: string[]
   ) => {
     if (!currentUser) return;
     setAutoSaveStatus('Saving...');
     try {
+      const targetExpenses = updatedExpenses !== undefined ? updatedExpenses : expensesRef.current;
+      const targetDeletedExpenseIds = updatedDeletedExpenseIds !== undefined ? updatedDeletedExpenseIds : deletedExpenseIdsRef.current;
+      const targetDismissedRecurringKeys = updatedDismissedRecurringKeys !== undefined ? updatedDismissedRecurringKeys : dismissedRecurringKeysRef.current;
+
       const dbToSave: UserDedicatedDatabase = {
         databaseId: currentUser.databaseId,
         userId: currentUser.id,
@@ -268,11 +334,13 @@ export default function App() {
         version: (userDb?.version || 1) + 1,
         accounts: updatedAccounts,
         installments: updatedInstallments,
-        expenses: updatedExpenses || expenses,
-        standingInstructions: updatedStandingInstructions || standingInstructions,
-        bankScheduledTransactions: updatedBankScheduledTransactions || bankScheduledTransactions,
-        quickPayTemplates: updatedQuickPayTemplates || quickPayTemplates,
-        utilityBills: updatedUtilityBills || utilityBills,
+        expenses: targetExpenses,
+        deletedExpenseIds: targetDeletedExpenseIds,
+        dismissedRecurringKeys: targetDismissedRecurringKeys,
+        standingInstructions: updatedStandingInstructions !== undefined ? updatedStandingInstructions : standingInstructions,
+        bankScheduledTransactions: updatedBankScheduledTransactions !== undefined ? updatedBankScheduledTransactions : bankScheduledTransactions,
+        quickPayTemplates: updatedQuickPayTemplates !== undefined ? updatedQuickPayTemplates : quickPayTemplates,
+        utilityBills: updatedUtilityBills !== undefined ? updatedUtilityBills : utilityBills,
         settings: updatedSettings,
         paidScheduleIds: Array.from(updatedPaid),
         scheduledScheduleIds: Array.from(updatedScheduled),
@@ -285,7 +353,7 @@ export default function App() {
       console.error('Auto-save error:', err);
       setAutoSaveStatus('Local state active');
     }
-  }, [currentUser, userDb, alertThresholds, expenses, standingInstructions, bankScheduledTransactions, quickPayTemplates, utilityBills]);
+  }, [currentUser, userDb, alertThresholds, standingInstructions, bankScheduledTransactions, quickPayTemplates, utilityBills]);
 
   // Update dynamic alerts whenever accounts, installments, currency, or timezone changes
   useEffect(() => {
@@ -336,9 +404,22 @@ export default function App() {
   // Database Updated from Family Sync or Fresh Reset
   const handleDatabaseUpdated = (updatedDb: UserDedicatedDatabase) => {
     setUserDb(updatedDb);
-    setAccounts(updatedDb.accounts || []);
-    setInstallments(updatedDb.installments || []);
-    setExpenses(updatedDb.expenses || []);
+    const dbDeletedIds = updatedDb.deletedExpenseIds || [];
+    const dbDismissedKeys = updatedDb.dismissedRecurringKeys || [];
+    setDeletedExpenseIds(dbDeletedIds);
+    deletedExpenseIdsRef.current = dbDeletedIds;
+    setDismissedRecurringKeys(dbDismissedKeys);
+    dismissedRecurringKeysRef.current = dbDismissedKeys;
+
+    const accs = updatedDb.accounts || [];
+    setAccounts(accs);
+    accountsRef.current = accs;
+    const insts = updatedDb.installments || [];
+    setInstallments(insts);
+    installmentsRef.current = insts;
+    const exps = updatedDb.expenses || [];
+    setExpenses(exps);
+    expensesRef.current = exps;
     setStandingInstructions(updatedDb.standingInstructions || []);
     setBankScheduledTransactions(updatedDb.bankScheduledTransactions || []);
     setQuickPayTemplates(
@@ -1174,13 +1255,21 @@ export default function App() {
 
     // If recurring expense was added, automatically verify and generate any due cycles
     if (createdExpense.isRecurring) {
-      const recurringCheck = processDueRecurringExpenses(nextExpenses, nextAccounts);
+      const recurringCheck = processDueRecurringExpenses(
+        nextExpenses, 
+        nextAccounts, 
+        new Date(), 
+        dismissedRecurringKeysRef.current, 
+        deletedExpenseIdsRef.current
+      );
       nextExpenses = recurringCheck.updatedExpenses;
       nextAccounts = recurringCheck.updatedAccounts;
     }
 
     setExpenses(nextExpenses);
+    expensesRef.current = nextExpenses;
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
   };
 
@@ -1255,13 +1344,21 @@ export default function App() {
 
     // If updated expense is recurring, process any due occurrences
     if (updatedExpense.isRecurring) {
-      const recurringCheck = processDueRecurringExpenses(nextExpenses, nextAccounts);
+      const recurringCheck = processDueRecurringExpenses(
+        nextExpenses, 
+        nextAccounts, 
+        new Date(), 
+        dismissedRecurringKeysRef.current, 
+        deletedExpenseIdsRef.current
+      );
       nextExpenses = recurringCheck.updatedExpenses;
       nextAccounts = recurringCheck.updatedAccounts;
     }
 
     setExpenses(nextExpenses);
+    expensesRef.current = nextExpenses;
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
   };
 
@@ -1269,13 +1366,15 @@ export default function App() {
   const handleForceGenerateRecurringCycle = (parentExpense: ExpenseItem) => {
     const result = forceGenerateNextRecurringMonth(parentExpense, expenses, accounts);
     setExpenses(result.updatedExpenses);
+    expensesRef.current = result.updatedExpenses;
     setAccounts(result.updatedAccounts);
+    accountsRef.current = result.updatedAccounts;
     triggerAutoSave(result.updatedAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, result.updatedExpenses);
     setAutoSaveStatus('Generated next month bill');
   };
 
-  // Delete expense
-  const handleDeleteExpense = (expenseId: string) => {
+  // Delete expense with full recurring series dismissal & permanent persistence
+  const handleDeleteExpense = (expenseId: string, deleteEntireSeries: boolean = false) => {
     const target = expenses.find((e) => e.id === expenseId);
     let nextAccounts = [...accounts];
 
@@ -1291,10 +1390,66 @@ export default function App() {
       });
     }
 
-    const nextExpenses = expenses.filter((e) => e.id !== expenseId);
+    // Track deleted IDs and dismissed recurring cycles so they never resurrect
+    const nextDeletedIds = Array.from(new Set([...deletedExpenseIdsRef.current, expenseId]));
+    const nextDismissedKeys = new Set(dismissedRecurringKeysRef.current);
+    let nextExpenses = expenses.filter((e) => e.id !== expenseId);
+
+    if (target) {
+      const seriesId = target.recurringSeriesId || target.id;
+      const dateParts = target.date.split('-');
+      if (dateParts.length >= 2) {
+        const monthKey = `${dateParts[0]}-${dateParts[1]}`;
+        nextDismissedKeys.add(`${seriesId}:${monthKey}`);
+        if (target.parentRecurringExpenseId) {
+          nextDismissedKeys.add(`${target.parentRecurringExpenseId}:${monthKey}`);
+        }
+      }
+
+      // If user chose to delete entire recurring series, or if the parent recurring bill itself was deleted:
+      if (deleteEntireSeries || target.isRecurring) {
+        const related = expenses.filter(
+          (e) => e.recurringSeriesId === seriesId || e.parentRecurringExpenseId === seriesId || e.parentRecurringExpenseId === target.id
+        );
+        related.forEach((rel) => {
+          nextDeletedIds.push(rel.id);
+          const parts = rel.date.split('-');
+          if (parts.length >= 2) {
+            nextDismissedKeys.add(`${seriesId}:${parts[0]}-${parts[1]}`);
+          }
+        });
+        nextExpenses = nextExpenses.filter(
+          (e) => e.id !== expenseId && e.recurringSeriesId !== seriesId && e.parentRecurringExpenseId !== seriesId && e.parentRecurringExpenseId !== target.id
+        );
+      }
+    }
+
+    const nextDismissedKeysArr = Array.from(nextDismissedKeys);
+
+    setDeletedExpenseIds(nextDeletedIds);
+    deletedExpenseIdsRef.current = nextDeletedIds;
+    setDismissedRecurringKeys(nextDismissedKeysArr);
+    dismissedRecurringKeysRef.current = nextDismissedKeysArr;
+
     setExpenses(nextExpenses);
+    expensesRef.current = nextExpenses;
     setAccounts(nextAccounts);
-    triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
+    accountsRef.current = nextAccounts;
+
+    triggerAutoSave(
+      nextAccounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      nextExpenses,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      nextDeletedIds,
+      nextDismissedKeysArr
+    );
   };
 
   // Immediate Settlement for any existing purchase
@@ -1455,9 +1610,29 @@ export default function App() {
 
   // Purge all pending/unsettled swipes awaiting settlement
   const handleClearUnsettledSwipes = () => {
+    const unsettled = expenses.filter((e) => e.status === 'unsettled');
+    const unsettledIds = unsettled.map((e) => e.id);
+    const nextDeletedIds = Array.from(new Set([...deletedExpenseIdsRef.current, ...unsettledIds]));
     const nextExpenses = expenses.filter((e) => e.status !== 'unsettled');
+
+    setDeletedExpenseIds(nextDeletedIds);
+    deletedExpenseIdsRef.current = nextDeletedIds;
     setExpenses(nextExpenses);
-    triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
+    expensesRef.current = nextExpenses;
+
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      nextExpenses,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      nextDeletedIds
+    );
     setAutoSaveStatus('Pending swipes cleared');
   };
 
@@ -2603,6 +2778,21 @@ export default function App() {
           onFactoryReset={handleFactoryReset}
         />
       )}
+
+      {/* Subtle Scroll-to-Top Button */}
+      <button
+        id="btn-scroll-to-top"
+        onClick={() => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        className={`fixed bottom-20 right-7 z-30 p-2.5 rounded-full bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white shadow-lg shadow-black/40 backdrop-blur-sm cursor-pointer transition-all duration-300 hover:scale-105 active:scale-95 flex items-center justify-center group ${
+          showScrollTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-3 pointer-events-none'
+        }`}
+        title="Scroll to top"
+        aria-label="Scroll to top"
+      >
+        <ChevronUp className="w-4 h-4 text-slate-300 group-hover:text-white transition-transform group-hover:-translate-y-0.5 duration-200" />
+      </button>
 
       {/* Floating Quick Action Button for fast single-click action across any tab */}
       <button

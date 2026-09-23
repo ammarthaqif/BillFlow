@@ -496,11 +496,12 @@ export class UserDatabaseService {
     }
 
     const existingExpIds = new Set((currentDb.expenses || []).map((e) => e.id));
+    const deletedExpIds = new Set(currentDb.deletedExpenseIds || []);
     const newExpenses: ExpenseItem[] = [...(currentDb.expenses || [])];
 
     if (currentUser.linkedPartner.permissions.shareExpenses && partnerDb.expenses) {
       for (const pExp of partnerDb.expenses) {
-        if (!existingExpIds.has(pExp.id)) {
+        if (!existingExpIds.has(pExp.id) && !deletedExpIds.has(pExp.id)) {
           newExpenses.push({
             ...pExp,
             ownerName: `${partnerUser.name} (${partnerUser.familyRole})`,
@@ -930,8 +931,19 @@ export class UserDatabaseService {
           parsed.settings.monthlySpendingCap = parsed.settings.monthlySpendingCap ?? 5000;
         }
         // Migration: ensure accounts have valid defaults and expenses/standing instructions array are present
-        if (!parsed.expenses || parsed.expenses.length === 0) {
-          parsed.expenses = INITIAL_EXPENSES.slice(0, 6);
+        if (!Array.isArray(parsed.expenses)) {
+          parsed.expenses = [];
+        }
+        if (!Array.isArray(parsed.deletedExpenseIds)) {
+          parsed.deletedExpenseIds = [];
+        }
+        if (!Array.isArray(parsed.dismissedRecurringKeys)) {
+          parsed.dismissedRecurringKeys = [];
+        }
+        // Filter out any deleted expenses by ID
+        if (parsed.deletedExpenseIds.length > 0) {
+          const delSet = new Set(parsed.deletedExpenseIds);
+          parsed.expenses = parsed.expenses.filter((e) => !delSet.has(e.id));
         }
         if (!parsed.standingInstructions) {
           parsed.standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
@@ -1177,6 +1189,8 @@ export class UserDatabaseService {
    */
   static clearUserExpenses(userId: string): UserDedicatedDatabase {
     const db = this.loadUserDatabase(userId);
+    const existingIds = (db.expenses || []).map((e) => e.id);
+    db.deletedExpenseIds = Array.from(new Set([...(db.deletedExpenseIds || []), ...existingIds]));
     db.expenses = [];
     db.lastUpdated = new Date().toISOString();
     this.saveUserDatabase(db);
@@ -1188,6 +1202,8 @@ export class UserDatabaseService {
    */
   static clearUnsettledSwipes(userId: string): UserDedicatedDatabase {
     const db = this.loadUserDatabase(userId);
+    const unsettledIds = (db.expenses || []).filter((e) => e.status === 'unsettled').map((e) => e.id);
+    db.deletedExpenseIds = Array.from(new Set([...(db.deletedExpenseIds || []), ...unsettledIds]));
     db.expenses = (db.expenses || []).filter((e) => e.status !== 'unsettled');
     db.lastUpdated = new Date().toISOString();
     this.saveUserDatabase(db);

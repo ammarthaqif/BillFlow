@@ -119,25 +119,32 @@ export function createRecurringExpenseEntry(
 export function processDueRecurringExpenses(
   expenses: ExpenseItem[],
   accounts: BillAccount[],
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  dismissedRecurringKeys: string[] = [],
+  deletedExpenseIds: string[] = []
 ): {
   updatedExpenses: ExpenseItem[];
   updatedAccounts: BillAccount[];
   generatedCount: number;
   newlyGeneratedExpenses: ExpenseItem[];
 } {
-  const recurringParents = expenses.filter((e) => e.isRecurring);
+  const deletedSet = new Set(deletedExpenseIds);
+  const dismissedSet = new Set(dismissedRecurringKeys);
+
+  // Filter out any deleted items immediately
+  let nextExpenses = expenses.filter((e) => !deletedSet.has(e.id));
+  let nextAccounts = [...accounts];
+
+  const recurringParents = nextExpenses.filter((e) => e.isRecurring && !deletedSet.has(e.id));
   if (recurringParents.length === 0) {
     return {
-      updatedExpenses: expenses,
-      updatedAccounts: accounts,
+      updatedExpenses: nextExpenses,
+      updatedAccounts: nextAccounts,
       generatedCount: 0,
       newlyGeneratedExpenses: [],
     };
   }
 
-  let nextExpenses = [...expenses];
-  let nextAccounts = [...accounts];
   const newlyGeneratedExpenses: ExpenseItem[] = [];
 
   const refYear = referenceDate.getFullYear();
@@ -171,6 +178,20 @@ export function processDueRecurringExpenses(
 
     while (curY < refYear || (curY === refYear && curM <= refMonth)) {
       const monthKey = `${curY.toString().padStart(4, '0')}-${(curM + 1).toString().padStart(2, '0')}`;
+      const seriesKey = `${seriesId}:${monthKey}`;
+      const parentKey = `${parent.id}:${monthKey}`;
+
+      // Check if user previously deleted or dismissed this recurring cycle
+      if (dismissedSet.has(seriesKey) || dismissedSet.has(parentKey)) {
+        existingMonthKeys.add(monthKey);
+        curM++;
+        if (curM > 11) {
+          curM = 0;
+          curY++;
+        }
+        continue;
+      }
+
       const clampedDay = clampDayToMonth(curY, curM, recurringDay);
 
       // Check if we have reached or passed the recurring day in this month
@@ -180,25 +201,27 @@ export function processDueRecurringExpenses(
         const targetDateStr = formatDateKey(curY, curM, clampedDay);
         const newEntry = createRecurringExpenseEntry(parent, targetDateStr);
 
-        newlyGeneratedExpenses.push(newEntry);
-        existingMonthKeys.add(monthKey);
+        if (!deletedSet.has(newEntry.id)) {
+          newlyGeneratedExpenses.push(newEntry);
+          existingMonthKeys.add(monthKey);
 
-        // Update balances
-        if (newEntry.status === 'unsettled') {
-          const accIdx = nextAccounts.findIndex((a) => a.id === newEntry.accountId);
-          if (accIdx !== -1) {
-            nextAccounts[accIdx] = {
-              ...nextAccounts[accIdx],
-              totalBalance: Math.round((nextAccounts[accIdx].totalBalance + newEntry.amount) * 100) / 100,
-            };
-          }
-        } else if (newEntry.status === 'settled' && newEntry.settledFromAccountId) {
-          const bankIdx = nextAccounts.findIndex((a) => a.id === newEntry.settledFromAccountId);
-          if (bankIdx !== -1) {
-            nextAccounts[bankIdx] = {
-              ...nextAccounts[bankIdx],
-              totalBalance: Math.max(0, Math.round((nextAccounts[bankIdx].totalBalance - newEntry.amount) * 100) / 100),
-            };
+          // Update balances
+          if (newEntry.status === 'unsettled') {
+            const accIdx = nextAccounts.findIndex((a) => a.id === newEntry.accountId);
+            if (accIdx !== -1) {
+              nextAccounts[accIdx] = {
+                ...nextAccounts[accIdx],
+                totalBalance: Math.round((nextAccounts[accIdx].totalBalance + newEntry.amount) * 100) / 100,
+              };
+            }
+          } else if (newEntry.status === 'settled' && newEntry.settledFromAccountId) {
+            const bankIdx = nextAccounts.findIndex((a) => a.id === newEntry.settledFromAccountId);
+            if (bankIdx !== -1) {
+              nextAccounts[bankIdx] = {
+                ...nextAccounts[bankIdx],
+                totalBalance: Math.max(0, Math.round((nextAccounts[bankIdx].totalBalance - newEntry.amount) * 100) / 100),
+              };
+            }
           }
         }
       }
