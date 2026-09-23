@@ -158,6 +158,10 @@ export default function App() {
   const [selectedBankAccountIdForUpdate, setSelectedBankAccountIdForUpdate] = useState<string | undefined>(undefined);
   const [isAccountTransactionsOpen, setIsAccountTransactionsOpen] = useState(false);
   const [selectedAccountForTransactions, setSelectedAccountForTransactions] = useState<BillAccount | null>(null);
+
+  // Sub-views for consolidated primary tabs
+  const [todaySubView, setTodaySubView] = useState<'command' | 'macro'>('command');
+  const [strategyInitialView, setStrategyInitialView] = useState<'sequencer' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'utilities'>('sequencer');
   const [isEditAccountOpen, setIsEditAccountOpen] = useState(false);
   const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<BillAccount | null>(null);
   const [isStandaloneExpenseModalOpen, setIsStandaloneExpenseModalOpen] = useState(false);
@@ -1497,12 +1501,24 @@ export default function App() {
           setIsBankAdvisorOpen(true);
         }}
         onRecordExpense={() => {
-          setUniversalQuickAddInitialTab('expense');
-          setIsUniversalQuickAddOpen(true);
+          setStandaloneEditingExpense(null);
+          setStandaloneExpenseInitialAccount(undefined);
+          setIsStandaloneExpenseModalOpen(true);
         }}
         onOpenQuickAdd={(tab) => {
-          setUniversalQuickAddInitialTab(tab || 'expense');
-          setIsUniversalQuickAddOpen(true);
+          if (tab === 'expense' || !tab) {
+            setStandaloneEditingExpense(null);
+            setStandaloneExpenseInitialAccount(undefined);
+            setIsStandaloneExpenseModalOpen(true);
+          } else if (tab === 'bank_balance') {
+            setSelectedBankAccountIdForUpdate(undefined);
+            setIsUpdateBankBalanceOpen(true);
+          } else if (tab === 'account') {
+            setIsConnectBankOpen(true);
+          } else {
+            setUniversalQuickAddInitialTab(tab);
+            setIsUniversalQuickAddOpen(true);
+          }
         }}
         onOpenResetDatabase={() => setIsDatabaseResetOpen(true)}
         onLogout={handleLogout}
@@ -1587,15 +1603,17 @@ export default function App() {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-4 space-y-4 sm:space-y-6">
-        {/* Top Sticky Navigation Tabs Bar */}
+        {/* Top Sticky Navigation Tabs Bar - Streamlined 4 Main Tabs */}
         <div className="sticky top-16 z-20 bg-slate-950/95 backdrop-blur-md py-2.5 sm:py-3 border-b border-slate-800/80 -mx-3 px-3 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none text-xs font-semibold">
-            {/* Tab: Today */}
+          <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto pb-1 scrollbar-none text-xs font-semibold">
+            {/* Tab 1: Today's Command Hub */}
             <button
               id="tab-today-hub"
-              onClick={() => setActiveTab('today')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
-                activeTab === 'today'
+              onClick={() => {
+                setActiveTab('today');
+              }}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'today' || activeTab === 'overview'
                   ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
               }`}
@@ -1604,39 +1622,11 @@ export default function App() {
               <span>Today's Command Hub</span>
             </button>
 
-            {/* Tab: Executive Overview */}
-            <button
-              id="tab-overview"
-              onClick={() => setActiveTab('overview')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
-                activeTab === 'overview'
-                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Executive Overview</span>
-            </button>
-
-            {/* Tab: Strategy & Cash Flow */}
-            <button
-              id="tab-strategy-hub"
-              onClick={() => setActiveTab('strategy')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
-                activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments' || activeTab === 'rewards_balancer'
-                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
-              }`}
-            >
-              <Sliders className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span>Strategy & Cash Flow</span>
-            </button>
-
-            {/* Tab: Daily Expenses */}
+            {/* Tab 2: Daily Expenses */}
             <button
               id="tab-expenses"
               onClick={() => setActiveTab('expenses')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
                 activeTab === 'expenses'
                   ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
@@ -1651,11 +1641,33 @@ export default function App() {
               </span>
             </button>
 
-            {/* Tab: Accounts & Automations */}
+            {/* Tab 3: Strategy & Cash Flow */}
+            <button
+              id="tab-strategy-hub"
+              onClick={() => {
+                setActiveTab('strategy');
+                setStrategyInitialView('sequencer');
+              }}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+                activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments' || activeTab === 'rewards_balancer' || activeTab === 'utilities'
+                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
+              }`}
+            >
+              <Sliders className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span>Strategy & Cash Flow</span>
+              {utilityBills.filter((b) => b.status !== 'paid').length > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {utilityBills.filter((b) => b.status !== 'paid').length} due
+                </span>
+              )}
+            </button>
+
+            {/* Tab 4: Accounts & Automations */}
             <button
               id="tab-accounts"
               onClick={() => setActiveTab('accounts')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
                 activeTab === 'accounts' || activeTab === 'standing_instructions'
                   ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/25 font-bold'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
@@ -1669,97 +1681,76 @@ export default function App() {
                 {accounts.length}
               </span>
             </button>
-
-            {/* Tab: Utility & PayLater Advisor */}
-            <button
-              id="tab-utilities"
-              onClick={() => setActiveTab('utilities')}
-              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap cursor-pointer min-h-[42px] ${
-                activeTab === 'utilities'
-                  ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-md shadow-amber-600/25 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/90'
-              }`}
-            >
-              <Zap className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Utility & SPayLater Advisor</span>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                activeTab === 'utilities' ? 'bg-white/20 text-white' : 'bg-amber-950/80 text-amber-300 border border-amber-500/30'
-              }`}>
-                {utilityBills.filter((b) => b.status !== 'paid').length}
-              </span>
-            </button>
           </div>
         </div>
 
-        {/* Tab: Executive Overview Full Page */}
-        {activeTab === 'overview' && (
-          <ExecutiveOverview
-            accounts={accounts}
-            installments={installments}
-            settings={settings}
-            expenses={expenses}
-            onOpenIncomeSettings={() => setIsIncomeSettingsOpen(true)}
-            onOpenBankAdvisor={(accId) => {
-              setAdvisorTargetAccountId(accId);
-              setIsBankAdvisorOpen(true);
-            }}
-            onUpdateSpendingCap={(newCap) => {
-              const updated = { ...settings, monthlySpendingCap: newCap };
-              handleSaveIncomeSettings(updated);
-            }}
-          />
-        )}
-
-        {/* Tab: Today's Daily Command Center */}
-        {activeTab === 'today' && (
+        {/* Tab 1: Today's Command Hub & Executive Macro Overview Consolidated */}
+        {(activeTab === 'today' || activeTab === 'overview') && (
           <div className="space-y-5">
-            {/* Quick Macro Ribbon on Today */}
-            <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-              <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs">
+            {/* View Mode Segmented Header */}
+            <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-2.5 sm:p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+              <div className="flex items-center gap-1.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                <button
+                  id="btn-subview-today-command"
+                  type="button"
+                  onClick={() => {
+                    setTodaySubView('command');
+                    setActiveTab('today');
+                  }}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    (todaySubView === 'command' && activeTab !== 'overview')
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Sun className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Daily Action Hub</span>
+                </button>
+                <button
+                  id="btn-subview-today-macro"
+                  type="button"
+                  onClick={() => {
+                    setTodaySubView('macro');
+                    setActiveTab('today');
+                  }}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    (todaySubView === 'macro' || activeTab === 'overview')
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Executive Macro Overview</span>
+                </button>
+              </div>
+
+              {/* Macro Pills */}
+              <div className="flex flex-wrap items-center gap-4 text-xs">
                 <div>
                   <span className="text-slate-400 text-[10px] block">Allocated Cash Buffer</span>
-                  <span className="font-mono font-bold text-white text-sm">
+                  <span className="font-mono font-bold text-white text-xs sm:text-sm">
                     {formatCurrency(settings.allocatedCashForBills, settings.currency || 'MYR')}
                   </span>
                 </div>
-                <div className="h-6 w-px bg-slate-800 hidden sm:block" />
+                <div className="h-5 w-px bg-slate-800 hidden sm:block" />
                 <div>
                   <span className="text-slate-400 text-[10px] block">Monthly Spending Cap</span>
-                  <span className="font-mono font-bold text-white text-sm">
+                  <span className="font-mono font-bold text-white text-xs sm:text-sm">
                     {formatCurrency(settings.monthlySpendingCap || 4000, settings.currency || 'MYR')}
                   </span>
                 </div>
-                <div className="h-6 w-px bg-slate-800 hidden sm:block" />
+                <div className="h-5 w-px bg-slate-800 hidden sm:block" />
                 <div>
                   <span className="text-slate-400 text-[10px] block">Active Accounts</span>
-                  <span className="font-mono font-bold text-indigo-300 text-sm">
+                  <span className="font-mono font-bold text-indigo-300 text-xs sm:text-sm">
                     {accounts.length} linked
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setIsOverviewExpandedOnToday(!isOverviewExpandedOnToday)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>{isOverviewExpandedOnToday ? 'Hide Macro Overview' : 'Expand Macro Overview'}</span>
-                  {isOverviewExpandedOnToday ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('overview')}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span>Full Overview Tab</span>
-                  <ArrowRightLeft className="w-3 h-3 text-indigo-400" />
-                </button>
-              </div>
             </div>
 
-            {/* Conditionally Expanded Full Executive Overview on Today View */}
-            {isOverviewExpandedOnToday && (
+            {/* Sub-view: Executive Macro Overview or Daily Action Hub */}
+            {(todaySubView === 'macro' || activeTab === 'overview') ? (
               <ExecutiveOverview
                 accounts={accounts}
                 installments={installments}
@@ -1775,59 +1766,87 @@ export default function App() {
                   handleSaveIncomeSettings(updated);
                 }}
               />
+            ) : (
+              <DailyHub
+                accounts={accounts}
+                installments={installments}
+                schedule={schedule}
+                expenses={expenses}
+                standingInstructions={standingInstructions}
+                settings={settings}
+                currency={settings.currency || 'MYR'}
+                quickPayTemplates={quickPayTemplates}
+                utilityBills={utilityBills}
+                onSelectQuickPayForPay={(tpl) => {
+                  setSelectedQuickPayTemplate(tpl);
+                  setIsQuickPayExecuteOpen(true);
+                }}
+                onOpenManageQuickPay={() => setIsQuickPayManageOpen(true)}
+                onOpenCreateQuickPay={() => setIsQuickPayManageOpen(true)}
+                onQuickLogExpense={handleQuickLogExpense}
+                onOpenReceiptCapture={() => setIsReceiptCaptureOpen(true)}
+                onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
+                onOpenBankAdvisor={(accId) => {
+                  setAdvisorTargetAccountId(accId);
+                  setIsBankAdvisorOpen(true);
+                }}
+                onOpenUniversalQuickAdd={(tab) => {
+                  if (tab === 'expense' || !tab) {
+                    setStandaloneEditingExpense(null);
+                    setStandaloneExpenseInitialAccount(undefined);
+                    setIsStandaloneExpenseModalOpen(true);
+                  } else if (tab === 'bank_balance') {
+                    setSelectedBankAccountIdForUpdate(undefined);
+                    setIsUpdateBankBalanceOpen(true);
+                  } else if (tab === 'account') {
+                    setIsConnectBankOpen(true);
+                  } else {
+                    setUniversalQuickAddInitialTab(tab);
+                    setIsUniversalQuickAddOpen(true);
+                  }
+                }}
+                onOpenUpdateBankBalance={(accId) => {
+                  setSelectedBankAccountIdForUpdate(accId);
+                  setIsUpdateBankBalanceOpen(true);
+                }}
+                onOpenExpenseModal={() => {
+                  setStandaloneEditingExpense(null);
+                  setStandaloneExpenseInitialAccount(undefined);
+                  setIsStandaloneExpenseModalOpen(true);
+                }}
+                onToggleScheduleStatus={(billId) => {
+                  if (!paidScheduleIds.has(billId)) {
+                    const nextPaid = new Set(paidScheduleIds);
+                    const nextScheduled = new Set(scheduledScheduleIds);
+                    nextScheduled.delete(billId);
+                    nextPaid.add(billId);
+                    setPaidScheduleIds(nextPaid);
+                    setScheduledScheduleIds(nextScheduled);
+                    triggerAutoSave(accounts, installments, settings, nextPaid, nextScheduled);
+                  }
+                }}
+                onImmediateSettleExpense={handleImmediateSettleExpense}
+                onBatchSettleUnsettled={handleBatchSettleUnsettled}
+                onClearUnsettledSwipes={handleClearUnsettledSwipes}
+                onSwitchTab={(tab) => {
+                  if (tab === 'overview') {
+                    setActiveTab('today');
+                    setTodaySubView('macro');
+                  } else if (tab === 'utilities') {
+                    setActiveTab('strategy');
+                    setStrategyInitialView('utilities');
+                  } else {
+                    setActiveTab(tab);
+                  }
+                }}
+                onDeleteExpense={handleDeleteExpense}
+              />
             )}
-
-            <DailyHub
-              accounts={accounts}
-              installments={installments}
-              schedule={schedule}
-              expenses={expenses}
-              standingInstructions={standingInstructions}
-              settings={settings}
-              currency={settings.currency || 'MYR'}
-              quickPayTemplates={quickPayTemplates}
-              utilityBills={utilityBills}
-              onSelectQuickPayForPay={(tpl) => {
-                setSelectedQuickPayTemplate(tpl);
-                setIsQuickPayExecuteOpen(true);
-              }}
-              onOpenManageQuickPay={() => setIsQuickPayManageOpen(true)}
-              onOpenCreateQuickPay={() => setIsQuickPayManageOpen(true)}
-              onQuickLogExpense={handleQuickLogExpense}
-              onOpenReceiptCapture={() => setIsReceiptCaptureOpen(true)}
-              onOpenAIAdvisor={() => setIsAIAdvisorOpen(true)}
-              onOpenBankAdvisor={(accId) => {
-                setAdvisorTargetAccountId(accId);
-                setIsBankAdvisorOpen(true);
-              }}
-              onOpenUniversalQuickAdd={(tab) => {
-                setUniversalQuickAddInitialTab(tab || 'expense');
-                setIsUniversalQuickAddOpen(true);
-              }}
-              onToggleScheduleStatus={(billId) => {
-                if (!paidScheduleIds.has(billId)) {
-                  const nextPaid = new Set(paidScheduleIds);
-                  const nextScheduled = new Set(scheduledScheduleIds);
-                  nextScheduled.delete(billId);
-                  nextPaid.add(billId);
-                  setPaidScheduleIds(nextPaid);
-                  setScheduledScheduleIds(nextScheduled);
-                  triggerAutoSave(accounts, installments, settings, nextPaid, nextScheduled);
-                }
-              }}
-              onImmediateSettleExpense={handleImmediateSettleExpense}
-              onBatchSettleUnsettled={handleBatchSettleUnsettled}
-              onClearUnsettledSwipes={handleClearUnsettledSwipes}
-              onSwitchTab={(tab) => {
-                setActiveTab(tab);
-              }}
-              onDeleteExpense={handleDeleteExpense}
-            />
           </div>
         )}
 
-        {/* Tab 2: Strategy & Cash Flow Hub (Sequencer, Float Calendar, Installments, Rewards Balancer) */}
-        {(activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments' || activeTab === 'rewards_balancer') && (
+        {/* Tab 3: Strategy & Cash Flow Hub (Sequencer, Float Calendar, Utilities Advisor, Installments, Rewards Balancer) */}
+        {(activeTab === 'strategy' || activeTab === 'optimizer' || activeTab === 'cycle_matrix' || activeTab === 'installments' || activeTab === 'rewards_balancer' || activeTab === 'utilities') && (
           <StrategyCashFlowHub
             initialView={
               activeTab === 'cycle_matrix'
@@ -1836,7 +1855,9 @@ export default function App() {
                 ? 'installments'
                 : activeTab === 'rewards_balancer'
                 ? 'rewards_balancer'
-                : 'sequencer'
+                : activeTab === 'utilities'
+                ? 'utilities'
+                : strategyInitialView
             }
             accounts={accounts}
             schedule={schedule}
@@ -1873,6 +1894,13 @@ export default function App() {
               setStandaloneExpenseInitialAccount(prefill.accountId);
               setIsStandaloneExpenseModalOpen(true);
             }}
+            utilityBills={utilityBills}
+            settings={settings}
+            onAddBill={handleAddUtilityBill}
+            onUpdateBill={handleUpdateUtilityBill}
+            onDeleteBill={handleDeleteUtilityBill}
+            onExecuteBillPayment={handleExecuteUtilityBillPayment}
+            onAddExpense={handleAddExpense}
           />
         )}
 
@@ -2272,21 +2300,6 @@ export default function App() {
               setIsEditAccountOpen(true);
             }}
             onForceGenerateRecurringCycle={handleForceGenerateRecurringCycle}
-          />
-        )}
-
-        {/* Tab 6: Utility Bills & SPayLater Optimizer */}
-        {activeTab === 'utilities' && (
-          <UtilityBillOptimizer
-            bills={utilityBills}
-            accounts={accounts}
-            settings={settings}
-            activeCurrency={settings.currency || 'MYR'}
-            onAddBill={handleAddUtilityBill}
-            onUpdateBill={handleUpdateUtilityBill}
-            onDeleteBill={handleDeleteUtilityBill}
-            onExecuteBillPayment={handleExecuteUtilityBillPayment}
-            onAddExpense={handleAddExpense}
           />
         )}
       </main>

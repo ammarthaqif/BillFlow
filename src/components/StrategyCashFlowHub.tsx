@@ -18,16 +18,18 @@ import {
   InstallmentPlan, 
   MonthlyCashFlowProjection,
   UserSettings,
-  ExpenseItem 
+  ExpenseItem,
+  UtilityBillItem
 } from '../types';
 import { CurrencyCode, formatCurrency } from '../utils/currency';
 import { PaymentOptimizerMatrix } from './PaymentOptimizerMatrix';
 import { CycleGraceVisualizer } from './CycleGraceVisualizer';
 import { InstallmentsCashFlowTracker } from './InstallmentsCashFlowTracker';
 import { RewardsCashbackBalancer } from './RewardsCashbackBalancer';
+import { UtilityBillOptimizer } from './UtilityBillOptimizer';
 
 interface StrategyCashFlowHubProps {
-  initialView?: 'sequencer' | 'cycle_matrix' | 'installments' | 'rewards_balancer';
+  initialView?: 'sequencer' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'utilities';
   accounts: BillAccount[];
   schedule: PaymentScheduleItem[];
   strategy: PaymentStrategyType;
@@ -47,6 +49,18 @@ interface StrategyCashFlowHubProps {
   expenses?: ExpenseItem[];
   onUpdateAccount?: (account: BillAccount) => void;
   onQuickLogExpense?: (prefill: { amount: number; accountId: string; category: string; description: string; date: string }) => void;
+  utilityBills?: UtilityBillItem[];
+  settings?: UserSettings;
+  onAddBill?: (bill: Omit<UtilityBillItem, 'id' | 'createdAt'>) => void;
+  onUpdateBill?: (bill: UtilityBillItem) => void;
+  onDeleteBill?: (id: string) => void;
+  onExecuteBillPayment?: (
+    bill: UtilityBillItem,
+    targetAccountId: string,
+    targetAccountName: string,
+    paidAmount: number
+  ) => void;
+  onAddExpense?: (expense: Omit<ExpenseItem, 'id'>) => void;
 }
 
 export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
@@ -70,16 +84,27 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
   expenses = [],
   onUpdateAccount,
   onQuickLogExpense,
+  utilityBills = [],
+  settings,
+  onAddBill,
+  onUpdateBill,
+  onDeleteBill,
+  onExecuteBillPayment,
+  onAddExpense,
 }) => {
-  const [subView, setSubView] = useState<'sequencing' | 'cycle_matrix' | 'installments' | 'rewards_balancer'>(
+  const [subView, setSubView] = useState<'sequencing' | 'cycle_matrix' | 'installments' | 'rewards_balancer' | 'utilities'>(
     initialView === 'cycle_matrix'
       ? 'cycle_matrix'
       : initialView === 'installments'
       ? 'installments'
       : initialView === 'rewards_balancer'
       ? 'rewards_balancer'
+      : initialView === 'utilities'
+      ? 'utilities'
       : 'sequencing'
   );
+
+  const pendingUtilityCount = utilityBills.filter((b) => b.status !== 'paid').length;
 
   return (
     <div className="space-y-5">
@@ -123,6 +148,26 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
           >
             <Gift className="w-3.5 h-3.5 text-amber-400" />
             <span>Cashback & Rewards Balancer</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubView('utilities')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              subView === 'utilities'
+                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/25'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>Utility & SPayLater Advisor</span>
+            {pendingUtilityCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                subView === 'utilities' ? 'bg-black/30 text-white' : 'bg-amber-950/80 text-amber-300 border border-amber-500/30'
+              }`}>
+                {pendingUtilityCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -181,6 +226,34 @@ export const StrategyCashFlowHub: React.FC<StrategyCashFlowHubProps> = ({
           currency={currency}
           onUpdateAccount={onUpdateAccount}
           onQuickLogExpense={onQuickLogExpense}
+        />
+      )}
+
+      {subView === 'utilities' && (
+        <UtilityBillOptimizer
+          bills={utilityBills}
+          accounts={accounts}
+          settings={settings || {
+            monthlyIncome: 7000,
+            salaryPayday: 25,
+            allocatedCashForBills: 3500,
+            emergencyBufferGoal: 5000,
+            currentEmergencyFund: 3000,
+            notificationPreferences: {
+              emailAlerts: true,
+              pushNotifications: true,
+              daysBeforeDueAlert: 3,
+              highUtilizationWarning: true,
+              utilizationThresholdPercent: 70
+            },
+            currency: currency
+          }}
+          activeCurrency={currency}
+          onAddBill={onAddBill || (() => {})}
+          onUpdateBill={onUpdateBill || (() => {})}
+          onDeleteBill={onDeleteBill || (() => {})}
+          onExecuteBillPayment={onExecuteBillPayment || (() => {})}
+          onAddExpense={onAddExpense}
         />
       )}
 

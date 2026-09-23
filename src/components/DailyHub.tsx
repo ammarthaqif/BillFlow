@@ -74,6 +74,8 @@ interface DailyHubProps {
   onOpenAIAdvisor?: () => void;
   onOpenBankAdvisor?: (accountId?: string) => void;
   onOpenUniversalQuickAdd?: (tab?: 'expense' | 'bank_balance' | 'account' | 'recurring') => void;
+  onOpenUpdateBankBalance?: (accountId?: string) => void;
+  onOpenExpenseModal?: () => void;
   onToggleScheduleStatus?: (scheduleId: string) => void;
   onImmediateSettleExpense?: (
     expenseId: string, 
@@ -108,6 +110,8 @@ export const DailyHub: React.FC<DailyHubProps> = ({
   onOpenAIAdvisor,
   onOpenBankAdvisor,
   onOpenUniversalQuickAdd,
+  onOpenUpdateBankBalance,
+  onOpenExpenseModal,
   onToggleScheduleStatus,
   onImmediateSettleExpense,
   onBatchSettleUnsettled,
@@ -422,7 +426,13 @@ export const DailyHub: React.FC<DailyHubProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => onOpenUniversalQuickAdd?.('bank_balance')}
+                onClick={() => {
+                  if (onOpenUpdateBankBalance) {
+                    onOpenUpdateBankBalance(primaryBank?.id);
+                  } else if (onOpenUniversalQuickAdd) {
+                    onOpenUniversalQuickAdd('bank_balance');
+                  }
+                }}
                 className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
                 title="Update current bank balance"
               >
@@ -581,15 +591,28 @@ export const DailyHub: React.FC<DailyHubProps> = ({
               </div>
             </div>
 
-            {/* OCR Receipt CTA shortcut */}
-            <button
-              type="button"
-              onClick={onOpenReceiptCapture}
-              className="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 cursor-pointer text-[11px] hover:underline"
-            >
-              <Camera className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Or Scan Receipt via AI OCR →</span>
-            </button>
+            {/* OCR Receipt CTA shortcut & Full Form */}
+            <div className="flex items-center gap-3">
+              {onOpenExpenseModal && (
+                <button
+                  type="button"
+                  onClick={onOpenExpenseModal}
+                  className="text-slate-400 hover:text-white font-medium flex items-center gap-1 cursor-pointer text-[11px] hover:underline"
+                >
+                  <span>Full Form & Split Options</span>
+                </button>
+              )}
+              {onOpenReceiptCapture && (
+                <button
+                  type="button"
+                  onClick={onOpenReceiptCapture}
+                  className="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 cursor-pointer text-[11px] hover:underline"
+                >
+                  <Camera className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Scan Receipt via AI OCR →</span>
+                </button>
+              )}
+            </div>
           </div>
         </form>
 

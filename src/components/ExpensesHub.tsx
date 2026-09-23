@@ -302,6 +302,45 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* DEDICATED CAMERA-BASED QUICK ACTION BANNER */}
+      {onOpenReceiptCapture && (
+        <div className="bg-gradient-to-r from-emerald-950/70 via-slate-900 to-indigo-950/70 border border-emerald-500/40 rounded-3xl p-4 sm:p-5 shadow-xl relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="absolute -right-10 -top-10 w-44 h-44 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -left-10 -bottom-10 w-44 h-44 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          <div className="flex items-center gap-3.5 z-10">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-slate-950 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/25 ring-2 ring-emerald-400/30">
+              <Camera className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-white text-base sm:text-lg tracking-tight">
+                  Instant Camera Receipt & Bill Scanner
+                </h3>
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5" /> AI Vision
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-xl leading-relaxed">
+                Point your mobile or webcam at store receipts, invoices, or utility bills. Auto-detects total, date, merchant, and advises the optimal card or SPayLater rail.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 z-10 shrink-0">
+            <button
+              id="btn-scan-receipt-hero"
+              type="button"
+              onClick={onOpenReceiptCapture}
+              className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm tracking-wide shadow-xl shadow-emerald-500/30 hover:shadow-emerald-500/45 flex items-center justify-center gap-2.5 transition-all transform hover:-translate-y-0.5 cursor-pointer active:scale-95"
+            >
+              <Camera className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+              <span>Snap & Scan Receipt</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner / Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Metric 1: Total Recorded Expenses */}
@@ -465,11 +504,12 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
 
             {onOpenReceiptCapture && (
               <button
+                id="btn-scan-receipt-toolbar"
                 onClick={onOpenReceiptCapture}
-                className="px-3.5 py-2 rounded-xl bg-indigo-950/80 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 hover:text-white font-bold text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                className="px-3.5 py-2 rounded-xl bg-emerald-950/80 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-300 hover:text-white font-bold text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                 title="Capture receipt snapshot with camera or upload image"
               >
-                <Camera className="w-4 h-4 text-indigo-400" />
+                <Camera className="w-4 h-4 text-emerald-400" />
                 <span>Scan Receipt</span>
               </button>
             )}
@@ -1098,6 +1138,22 @@ export const ExpensesHub: React.FC<ExpensesHubProps> = ({
           setIsSettlementModalOpen(false);
         }}
       />
+
+      {/* Mobile Sticky Quick Action Camera FAB */}
+      {onOpenReceiptCapture && (
+        <div className="fixed bottom-5 right-5 z-40 sm:hidden">
+          <button
+            id="btn-scan-receipt-mobile-fab"
+            type="button"
+            onClick={onOpenReceiptCapture}
+            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs rounded-full shadow-2xl shadow-emerald-500/50 border-2 border-emerald-300/40 active:scale-95 transition-all cursor-pointer"
+            aria-label="Scan receipt with camera"
+          >
+            <Camera className="w-5 h-5 stroke-[2.5]" />
+            <span>Scan Receipt</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };
