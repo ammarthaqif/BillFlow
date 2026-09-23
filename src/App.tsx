@@ -126,6 +126,11 @@ export default function App() {
   dismissedRecurringKeysRef.current = dismissedRecurringKeys;
   // State: Standing Instructions & Scheduled Payments
   const [standingInstructions, setStandingInstructions] = useState<StandingInstruction[]>(INITIAL_STANDING_INSTRUCTIONS);
+  const [deletedStandingInstructionIds, setDeletedStandingInstructionIds] = useState<string[]>([]);
+  const standingInstructionsRef = useRef<StandingInstruction[]>(standingInstructions);
+  standingInstructionsRef.current = standingInstructions;
+  const deletedStandingInstructionIdsRef = useRef<string[]>(deletedStandingInstructionIds);
+  deletedStandingInstructionIdsRef.current = deletedStandingInstructionIds;
   // State: Bank Scheduled Transactions
   const [bankScheduledTransactions, setBankScheduledTransactions] = useState<BankScheduledTransaction[]>(INITIAL_BANK_SCHEDULED_TRANSACTIONS);
   // State: User settings
@@ -253,12 +258,24 @@ export default function App() {
       installmentsRef.current = db.installments || [];
       setExpenses(updatedExpenses);
       expensesRef.current = updatedExpenses;
-      setStandingInstructions(db.standingInstructions && db.standingInstructions.length > 0 ? db.standingInstructions : INITIAL_STANDING_INSTRUCTIONS);
-      setBankScheduledTransactions(
-        db.bankScheduledTransactions && db.bankScheduledTransactions.length > 0
-          ? db.bankScheduledTransactions
-          : INITIAL_BANK_SCHEDULED_TRANSACTIONS
-      );
+      
+      // CRITICAL FIX: Respect deletedStandingInstructionIds and preserve empty array [] if user deleted all records
+      const dbDeletedSiIds = db.deletedStandingInstructionIds || [];
+      const delSiSet = new Set(dbDeletedSiIds);
+      const rawStandingInstructions = Array.isArray(db.standingInstructions)
+        ? db.standingInstructions.filter((si) => !delSiSet.has(si.id))
+        : INITIAL_STANDING_INSTRUCTIONS.filter((si) => !delSiSet.has(si.id));
+
+      setDeletedStandingInstructionIds(dbDeletedSiIds);
+      deletedStandingInstructionIdsRef.current = dbDeletedSiIds;
+      setStandingInstructions(rawStandingInstructions);
+      standingInstructionsRef.current = rawStandingInstructions;
+
+      const rawBankScheduled = Array.isArray(db.bankScheduledTransactions)
+        ? db.bankScheduledTransactions
+        : INITIAL_BANK_SCHEDULED_TRANSACTIONS;
+      setBankScheduledTransactions(rawBankScheduled);
+
       if (db?.settings) {
         setSettings(db.settings);
         setAllocatedCash(db.settings.allocatedCashForBills ?? 3500);
@@ -290,6 +307,8 @@ export default function App() {
           expenses: updatedExpenses,
           deletedExpenseIds: dbDeletedIds,
           dismissedRecurringKeys: dbDismissedKeys,
+          standingInstructions: rawStandingInstructions,
+          deletedStandingInstructionIds: dbDeletedSiIds,
         });
       }
     } catch (err) {
@@ -317,7 +336,8 @@ export default function App() {
     updatedQuickPayTemplates?: QuickPayTemplate[],
     updatedUtilityBills?: UtilityBillItem[],
     updatedDeletedExpenseIds?: string[],
-    updatedDismissedRecurringKeys?: string[]
+    updatedDismissedRecurringKeys?: string[],
+    updatedDeletedStandingInstructionIds?: string[]
   ) => {
     if (!currentUser) return;
     setAutoSaveStatus('Saving...');
@@ -325,6 +345,8 @@ export default function App() {
       const targetExpenses = updatedExpenses !== undefined ? updatedExpenses : expensesRef.current;
       const targetDeletedExpenseIds = updatedDeletedExpenseIds !== undefined ? updatedDeletedExpenseIds : deletedExpenseIdsRef.current;
       const targetDismissedRecurringKeys = updatedDismissedRecurringKeys !== undefined ? updatedDismissedRecurringKeys : dismissedRecurringKeysRef.current;
+      const targetStandingInstructions = updatedStandingInstructions !== undefined ? updatedStandingInstructions : standingInstructionsRef.current;
+      const targetDeletedStandingInstructionIds = updatedDeletedStandingInstructionIds !== undefined ? updatedDeletedStandingInstructionIds : deletedStandingInstructionIdsRef.current;
 
       const dbToSave: UserDedicatedDatabase = {
         databaseId: currentUser.databaseId,
@@ -337,7 +359,8 @@ export default function App() {
         expenses: targetExpenses,
         deletedExpenseIds: targetDeletedExpenseIds,
         dismissedRecurringKeys: targetDismissedRecurringKeys,
-        standingInstructions: updatedStandingInstructions !== undefined ? updatedStandingInstructions : standingInstructions,
+        standingInstructions: targetStandingInstructions,
+        deletedStandingInstructionIds: targetDeletedStandingInstructionIds,
         bankScheduledTransactions: updatedBankScheduledTransactions !== undefined ? updatedBankScheduledTransactions : bankScheduledTransactions,
         quickPayTemplates: updatedQuickPayTemplates !== undefined ? updatedQuickPayTemplates : quickPayTemplates,
         utilityBills: updatedUtilityBills !== undefined ? updatedUtilityBills : utilityBills,
@@ -353,7 +376,7 @@ export default function App() {
       console.error('Auto-save error:', err);
       setAutoSaveStatus('Local state active');
     }
-  }, [currentUser, userDb, alertThresholds, standingInstructions, bankScheduledTransactions, quickPayTemplates, utilityBills]);
+  }, [currentUser, userDb, alertThresholds, bankScheduledTransactions, quickPayTemplates, utilityBills]);
 
   // Update dynamic alerts whenever accounts, installments, currency, or timezone changes
   useEffect(() => {
@@ -420,7 +443,12 @@ export default function App() {
     const exps = updatedDb.expenses || [];
     setExpenses(exps);
     expensesRef.current = exps;
-    setStandingInstructions(updatedDb.standingInstructions || []);
+    const dbDeletedSiIds = updatedDb.deletedStandingInstructionIds || [];
+    setDeletedStandingInstructionIds(dbDeletedSiIds);
+    deletedStandingInstructionIdsRef.current = dbDeletedSiIds;
+    const sis = updatedDb.standingInstructions || [];
+    setStandingInstructions(sis);
+    standingInstructionsRef.current = sis;
     setBankScheduledTransactions(updatedDb.bankScheduledTransactions || []);
     setQuickPayTemplates(
       updatedDb.quickPayTemplates && Array.isArray(updatedDb.quickPayTemplates)
@@ -971,21 +999,70 @@ export default function App() {
       id: `si-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       createdAt: new Date().toISOString(),
     };
-    const nextSI = [...standingInstructions, created];
+    const nextSI = [...standingInstructionsRef.current, created];
     setStandingInstructions(nextSI);
+    standingInstructionsRef.current = nextSI;
     triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, nextSI);
   };
 
   const handleUpdateStandingInstruction = (updatedSI: StandingInstruction) => {
-    const nextSI = standingInstructions.map((si) => si.id === updatedSI.id ? updatedSI : si);
+    const nextSI = standingInstructionsRef.current.map((si) => si.id === updatedSI.id ? updatedSI : si);
     setStandingInstructions(nextSI);
+    standingInstructionsRef.current = nextSI;
     triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, nextSI);
   };
 
   const handleDeleteStandingInstruction = (id: string) => {
-    const nextSI = standingInstructions.filter((si) => si.id !== id);
+    const nextDeletedSiIds = Array.from(new Set([...deletedStandingInstructionIdsRef.current, id]));
+    const nextSI = standingInstructionsRef.current.filter((si) => si.id !== id);
+
+    setDeletedStandingInstructionIds(nextDeletedSiIds);
+    deletedStandingInstructionIdsRef.current = nextDeletedSiIds;
     setStandingInstructions(nextSI);
-    triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, nextSI);
+    standingInstructionsRef.current = nextSI;
+
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      nextSI,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      nextDeletedSiIds
+    );
+  };
+
+  const handleClearAllStandingInstructions = () => {
+    const allIds = standingInstructionsRef.current.map((si) => si.id);
+    const nextDeletedSiIds = Array.from(new Set([...deletedStandingInstructionIdsRef.current, ...allIds]));
+
+    setDeletedStandingInstructionIds(nextDeletedSiIds);
+    deletedStandingInstructionIdsRef.current = nextDeletedSiIds;
+    setStandingInstructions([]);
+    standingInstructionsRef.current = [];
+
+    triggerAutoSave(
+      accounts,
+      installments,
+      settings,
+      paidScheduleIds,
+      scheduledScheduleIds,
+      expenses,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      nextDeletedSiIds
+    );
+    setAutoSaveStatus('Standing instructions cleared');
   };
 
   const handleExecuteStandingInstructionNow = (si: StandingInstruction) => {
@@ -1026,8 +1103,8 @@ export default function App() {
       nextExecutionDate: nextDate.toISOString().split('T')[0],
     };
 
-    const nextSI = standingInstructions.map((item) => item.id === si.id ? updatedSI : item);
-    const nextExpenses = [newExpense, ...expenses];
+    const nextSI = standingInstructionsRef.current.map((item) => item.id === si.id ? updatedSI : item);
+    const nextExpenses = [newExpense, ...expensesRef.current];
 
     const nextAccounts = accounts.map((acc) => {
       if (acc.id === si.sourceAccountId && acc.type === 'bank_account') {
@@ -1041,8 +1118,11 @@ export default function App() {
     });
 
     setStandingInstructions(nextSI);
+    standingInstructionsRef.current = nextSI;
     setExpenses(nextExpenses);
+    expensesRef.current = nextExpenses;
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses, nextSI);
   };
 
@@ -2438,6 +2518,7 @@ export default function App() {
               onAdd={handleAddStandingInstruction}
               onUpdate={handleUpdateStandingInstruction}
               onDelete={handleDeleteStandingInstruction}
+              onClearAll={handleClearAllStandingInstructions}
               onExecuteNow={handleExecuteStandingInstructionNow}
               currentUser={currentUser}
               onUpgradeToPro={() => {

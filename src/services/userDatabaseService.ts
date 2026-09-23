@@ -945,17 +945,23 @@ export class UserDatabaseService {
           const delSet = new Set(parsed.deletedExpenseIds);
           parsed.expenses = parsed.expenses.filter((e) => !delSet.has(e.id));
         }
-        if (!parsed.standingInstructions) {
-          parsed.standingInstructions = INITIAL_STANDING_INSTRUCTIONS.slice(0, 2);
+        if (!Array.isArray(parsed.deletedStandingInstructionIds)) {
+          parsed.deletedStandingInstructionIds = [];
         }
-        if (!parsed.bankScheduledTransactions) {
-          parsed.bankScheduledTransactions = [...INITIAL_BANK_SCHEDULED_TRANSACTIONS];
+        if (!Array.isArray(parsed.standingInstructions)) {
+          parsed.standingInstructions = [];
+        } else if (parsed.deletedStandingInstructionIds.length > 0) {
+          const delSiSet = new Set(parsed.deletedStandingInstructionIds);
+          parsed.standingInstructions = parsed.standingInstructions.filter((si) => !delSiSet.has(si.id));
         }
-        if (!parsed.quickPayTemplates || !Array.isArray(parsed.quickPayTemplates)) {
-          parsed.quickPayTemplates = [...INITIAL_QUICK_PAY_TEMPLATES];
+        if (!Array.isArray(parsed.bankScheduledTransactions)) {
+          parsed.bankScheduledTransactions = [];
         }
-        if (!parsed.utilityBills || !Array.isArray(parsed.utilityBills)) {
-          parsed.utilityBills = [...INITIAL_UTILITY_BILLS];
+        if (!Array.isArray(parsed.quickPayTemplates)) {
+          parsed.quickPayTemplates = [];
+        }
+        if (!Array.isArray(parsed.utilityBills)) {
+          parsed.utilityBills = [];
         }
         return parsed;
       } catch (err) {
@@ -1693,11 +1699,12 @@ export class UserDatabaseService {
     }
 
     const existingSiIds = new Set((currentDb.standingInstructions || []).map((s) => s.id));
+    const deletedSiIds = new Set(currentDb.deletedStandingInstructionIds || []);
     const mergedStandingInstructions: StandingInstruction[] = [...(currentDb.standingInstructions || [])];
     let siAdded = 0;
 
     for (const inSi of incomingStandingInstructions) {
-      if (!existingSiIds.has(inSi.id)) {
+      if (!existingSiIds.has(inSi.id) && !deletedSiIds.has(inSi.id)) {
         mergedStandingInstructions.push(inSi);
         existingSiIds.add(inSi.id);
         siAdded++;

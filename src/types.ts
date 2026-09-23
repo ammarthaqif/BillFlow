@@ -493,6 +493,7 @@ export interface UserDedicatedDatabase {
   deletedExpenseIds?: string[];
   dismissedRecurringKeys?: string[];
   standingInstructions?: StandingInstruction[];
+  deletedStandingInstructionIds?: string[];
   bankScheduledTransactions?: BankScheduledTransaction[];
   quickPayTemplates?: QuickPayTemplate[];
   utilityBills?: UtilityBillItem[];

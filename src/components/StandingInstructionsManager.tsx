@@ -38,6 +38,7 @@ interface StandingInstructionsManagerProps {
   onUpdate?: (instruction: StandingInstruction) => void;
   onDeleteInstruction?: (instructionId: string) => void;
   onDelete?: (instructionId: string) => void;
+  onClearAll?: () => void;
   onExecuteNow: (instruction: StandingInstruction) => void;
   onUpgradeToPro?: () => void;
 }
@@ -54,6 +55,7 @@ export function StandingInstructionsManager({
   onUpdate,
   onDeleteInstruction,
   onDelete,
+  onClearAll,
   onExecuteNow,
   onUpgradeToPro,
 }: StandingInstructionsManagerProps) {
@@ -225,6 +227,21 @@ export function StandingInstructionsManager({
         </div>
 
         <div className="flex items-center gap-2">
+          {standingInstructions.length > 0 && onClearAll && (
+            <button
+              onClick={() => {
+                if (window.confirm('Are you sure you want to delete and clear all standing instructions? This action cannot be undone.')) {
+                  onClearAll();
+                }
+              }}
+              className="px-3.5 py-2.5 rounded-xl border border-rose-500/30 hover:border-rose-500/60 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Clear all standing instructions"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Clear All</span>
+            </button>
+          )}
+
           {isLimitReached ? (
             <button
               onClick={() => onUpgradeToPro && onUpgradeToPro()}
