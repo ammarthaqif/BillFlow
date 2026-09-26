@@ -45,7 +45,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({
 
   const isFreeTier = currentUser?.tier === 'free';
   const aiUsed = currentUser?.tierLimits?.aiConsultationsUsed || 0;
-  const aiLimit = currentUser?.tierLimits?.monthlyAiConsultations || 3;
+  const aiLimit = currentUser?.tierLimits?.monthlyAiConsultations || 5;
   const isLimitReached = isFreeTier && aiUsed >= aiLimit;
 
   const quickPrompts = [

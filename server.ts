@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
@@ -7,7 +8,7 @@ import { createServer as createViteServer } from 'vite';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
@@ -215,7 +216,7 @@ let userSettings = {
 };
 
 // API: Health check
-app.get('/api/health', (req, res) => {
+app.get(['/health', '/_health', '/api/health'], (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -339,6 +340,10 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(404).json({ error: 'User not found. Please register first.' });
   }
 
+  if (user.email.toLowerCase() === 'ammarthaqif.ar@gmail.com') {
+    user.tier = 'pro';
+  }
+
   let db = userDatabases[user.id];
   if (!db) {
     db = {
@@ -347,8 +352,18 @@ app.post('/api/auth/login', (req, res) => {
       userEmail: user.email,
       lastUpdated: new Date().toISOString(),
       version: 1,
-      accounts: accounts,
-      installments: installments,
+      accounts: accounts.map((a) => ({
+        ...a,
+        id: `acc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+      })),
+      installments: installments.map((i) => ({
+        ...i,
+        id: `inst-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        ownerName: `${user.name} (${user.familyRole})`,
+        ownerRole: user.familyRole,
+      })),
       settings: { ...userSettings },
       paidScheduleIds: [],
       scheduledScheduleIds: [],
@@ -665,36 +680,69 @@ Analyze this receipt or bill snapshot and extract the following details accurate
 // Serve frontend in dev or prod
 async function start() {
   const isCompiled = typeof __dirname !== 'undefined' && (__dirname.endsWith('dist') || __dirname.includes('/dist'));
-  const isProduction = process.env.NODE_ENV === 'production' || process.env.PROD === 'true' || isCompiled;
+  const distPath = isCompiled ? path.resolve(__dirname) : path.join(process.cwd(), 'dist');
+  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
 
-  if (!isProduction) {
+  // In AI Studio and Cloud Run environments, dev server runs with `npm run dev` or NODE_ENV=development.
+  // We ONLY serve static dist if hasDist is true AND we are explicitly in production mode without dev lifecycle.
+  const isStartLifecycle = process.env.npm_lifecycle_event === 'start';
+  const isProdEnv = process.env.NODE_ENV === 'production' || process.env.PROD === 'true';
+  const isExplicitDev = process.env.NODE_ENV === 'development' || process.env.npm_lifecycle_event === 'dev';
+
+  const shouldUseDist = hasDist && (isProdEnv || isStartLifecycle) && !isExplicitDev;
+
+  if (!shouldUseDist) {
+    // Mount Vite dev server middlewares (on-the-fly compilation & HMR compatibility)
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    console.log(`[BillFlow] Mounted Vite development middleware`);
   } else {
-    const distPath = isCompiled ? path.resolve(__dirname) : path.join(process.cwd(), 'dist');
+    // Production: serve built static client assets
     app.use(express.static(distPath));
     app.get('*', (req, res, next) => {
-      if (req.path.startsWith('/api/')) {
+      if (req.path.startsWith('/api/') || req.path === '/health' || req.path === '/_health') {
         return next();
       }
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send('Frontend build not found. Please run npm run build.');
+      }
     });
+    console.log(`[BillFlow] Serving static production build from ${distPath}`);
   }
 
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT} [${shouldUseDist ? 'PRODUCTION' : 'DEVELOPMENT'}]`);
   });
 
   server.on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
-      console.warn(`Port ${PORT} is already in use by dev server process.`);
+      console.warn(`Port ${PORT} is already in use by another process.`);
     } else {
       console.error('Server error:', err);
     }
   });
+
+  // Graceful shutdown handling for container deployments (Cloud Run / SIGTERM)
+  const gracefulShutdown = (signal: string) => {
+    console.log(`Received ${signal}. Closing server on port ${PORT}...`);
+    server.close(() => {
+      console.log('HTTP server closed successfully.');
+      process.exit(0);
+    });
+    setTimeout(() => {
+      console.warn('Forcefully terminating process after shutdown timeout.');
+      process.exit(0);
+    }, 5000).unref();
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 start();

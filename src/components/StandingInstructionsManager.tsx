@@ -80,12 +80,13 @@ export function StandingInstructionsManager({
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
   const [autoExecuted, setAutoExecuted] = useState(true);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [ownerRole, setOwnerRole] = useState<'husband' | 'wife' | 'joint'>(
     currentUser.familyRole === 'wife' ? 'wife' : 'husband'
   );
 
   const isFreeTier = currentUser.tier === 'free';
-  const maxLimit = currentUser.tierLimits?.maxStandingInstructions || 3;
+  const maxLimit = currentUser.tierLimits?.maxStandingInstructions || 6;
   const isLimitReached = isFreeTier && standingInstructions.length >= maxLimit;
 
   // Calculations
@@ -228,18 +229,39 @@ export function StandingInstructionsManager({
 
         <div className="flex items-center gap-2">
           {standingInstructions.length > 0 && onClearAll && (
-            <button
-              onClick={() => {
-                if (window.confirm('Are you sure you want to delete and clear all standing instructions? This action cannot be undone.')) {
-                  onClearAll();
-                }
-              }}
-              className="px-3.5 py-2.5 rounded-xl border border-rose-500/30 hover:border-rose-500/60 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Clear all standing instructions"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-              <span>Clear All</span>
-            </button>
+            confirmClearAll ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClearAll();
+                    setConfirmClearAll(false);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg shadow-rose-900/40"
+                  title="Confirm clear all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Confirm Clear All?</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearAll(false)}
+                  className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmClearAll(true)}
+                className="px-3.5 py-2.5 rounded-xl border border-rose-500/30 hover:border-rose-500/60 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Clear all standing instructions"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Clear All</span>
+              </button>
+            )
           )}
 
           {isLimitReached ? (

@@ -133,6 +133,8 @@ export default function App() {
   deletedStandingInstructionIdsRef.current = deletedStandingInstructionIds;
   // State: Bank Scheduled Transactions
   const [bankScheduledTransactions, setBankScheduledTransactions] = useState<BankScheduledTransaction[]>(INITIAL_BANK_SCHEDULED_TRANSACTIONS);
+  const bankScheduledTransactionsRef = useRef<BankScheduledTransaction[]>(bankScheduledTransactions);
+  bankScheduledTransactionsRef.current = bankScheduledTransactions;
   // State: User settings
   const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
@@ -152,6 +154,8 @@ export default function App() {
 
   // Utility Bills State (for Intelligent Payment Advisor)
   const [utilityBills, setUtilityBills] = useState<UtilityBillItem[]>(INITIAL_UTILITY_BILLS);
+  const utilityBillsRef = useRef<UtilityBillItem[]>(utilityBills);
+  utilityBillsRef.current = utilityBills;
 
   // Alerts
   const [alerts, setAlerts] = useState<CustomAlert[]>([]);
@@ -166,14 +170,7 @@ export default function App() {
 
   useEffect(() => {
     const handleScroll = () => {
-      const tabEl = document.getElementById('tab-today-hub');
-      if (tabEl) {
-        const rect = tabEl.getBoundingClientRect();
-        // Visible when scrolled past the top sticky navigation header
-        setShowScrollTop(rect.top <= 75 || window.scrollY > 160);
-      } else {
-        setShowScrollTop(window.scrollY > 180);
-      }
+      setShowScrollTop(window.scrollY > 100);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -210,6 +207,8 @@ export default function App() {
 
   // Quick Pay Templates state (recurring non-automated bills)
   const [quickPayTemplates, setQuickPayTemplates] = useState<QuickPayTemplate[]>([]);
+  const quickPayTemplatesRef = useRef<QuickPayTemplate[]>(quickPayTemplates);
+  quickPayTemplatesRef.current = quickPayTemplates;
   const [isQuickPayExecuteOpen, setIsQuickPayExecuteOpen] = useState(false);
   const [selectedQuickPayTemplate, setSelectedQuickPayTemplate] = useState<QuickPayTemplate | null>(null);
   const [isQuickPayManageOpen, setIsQuickPayManageOpen] = useState(false);
@@ -342,11 +341,25 @@ export default function App() {
     if (!currentUser) return;
     setAutoSaveStatus('Saving...');
     try {
+      if (updatedAccounts) accountsRef.current = updatedAccounts;
+      if (updatedInstallments) installmentsRef.current = updatedInstallments;
+      if (updatedExpenses !== undefined) expensesRef.current = updatedExpenses;
+      if (updatedDeletedExpenseIds !== undefined) deletedExpenseIdsRef.current = updatedDeletedExpenseIds;
+      if (updatedDismissedRecurringKeys !== undefined) dismissedRecurringKeysRef.current = updatedDismissedRecurringKeys;
+      if (updatedStandingInstructions !== undefined) standingInstructionsRef.current = updatedStandingInstructions;
+      if (updatedDeletedStandingInstructionIds !== undefined) deletedStandingInstructionIdsRef.current = updatedDeletedStandingInstructionIds;
+      if (updatedBankScheduledTransactions !== undefined) bankScheduledTransactionsRef.current = updatedBankScheduledTransactions;
+      if (updatedQuickPayTemplates !== undefined) quickPayTemplatesRef.current = updatedQuickPayTemplates;
+      if (updatedUtilityBills !== undefined) utilityBillsRef.current = updatedUtilityBills;
+
       const targetExpenses = updatedExpenses !== undefined ? updatedExpenses : expensesRef.current;
       const targetDeletedExpenseIds = updatedDeletedExpenseIds !== undefined ? updatedDeletedExpenseIds : deletedExpenseIdsRef.current;
       const targetDismissedRecurringKeys = updatedDismissedRecurringKeys !== undefined ? updatedDismissedRecurringKeys : dismissedRecurringKeysRef.current;
       const targetStandingInstructions = updatedStandingInstructions !== undefined ? updatedStandingInstructions : standingInstructionsRef.current;
       const targetDeletedStandingInstructionIds = updatedDeletedStandingInstructionIds !== undefined ? updatedDeletedStandingInstructionIds : deletedStandingInstructionIdsRef.current;
+      const targetBankScheduled = updatedBankScheduledTransactions !== undefined ? updatedBankScheduledTransactions : bankScheduledTransactionsRef.current;
+      const targetQuickPayTemplates = updatedQuickPayTemplates !== undefined ? updatedQuickPayTemplates : quickPayTemplatesRef.current;
+      const targetUtilityBills = updatedUtilityBills !== undefined ? updatedUtilityBills : utilityBillsRef.current;
 
       const dbToSave: UserDedicatedDatabase = {
         databaseId: currentUser.databaseId,
@@ -361,9 +374,9 @@ export default function App() {
         dismissedRecurringKeys: targetDismissedRecurringKeys,
         standingInstructions: targetStandingInstructions,
         deletedStandingInstructionIds: targetDeletedStandingInstructionIds,
-        bankScheduledTransactions: updatedBankScheduledTransactions !== undefined ? updatedBankScheduledTransactions : bankScheduledTransactions,
-        quickPayTemplates: updatedQuickPayTemplates !== undefined ? updatedQuickPayTemplates : quickPayTemplates,
-        utilityBills: updatedUtilityBills !== undefined ? updatedUtilityBills : utilityBills,
+        bankScheduledTransactions: targetBankScheduled,
+        quickPayTemplates: targetQuickPayTemplates,
+        utilityBills: targetUtilityBills,
         settings: updatedSettings,
         paidScheduleIds: Array.from(updatedPaid),
         scheduledScheduleIds: Array.from(updatedScheduled),
@@ -408,7 +421,7 @@ export default function App() {
     if (currentUser) {
       const check = UserDatabaseService.canSwitchToUser(currentUser, newUser.id);
       if (!check.allowed) {
-        alert(check.reason || 'Switching to this user profile is not permitted.');
+        setAutoSaveStatus(check.reason || 'Switching to this user profile is not permitted.');
         return;
       }
     }
@@ -943,14 +956,16 @@ export default function App() {
 
   // Add new account with Free Tier limit check
   const handleAddAccount = async (newAcc: Omit<BillAccount, 'id' | 'apiSynced' | 'lastSyncedAt' | 'status' | 'accountNumberMask'>) => {
-    if (currentUser?.tier === 'free' && accounts.length >= (currentUser.tierLimits?.maxAccounts || 3)) {
-      setUpgradeReason(`Free Tier Limit: You have reached the maximum of ${currentUser.tierLimits?.maxAccounts || 3} linked accounts. Upgrade to Pro for unlimited accounts.`);
+    const isPro = currentUser?.tier === 'pro';
+    const maxAccountsAllowed = isPro ? 999 : (currentUser?.tierLimits?.maxAccounts || 6);
+    if (!isPro && accounts.length >= maxAccountsAllowed) {
+      setUpgradeReason(`Free Tier Limit: You have reached the maximum of ${maxAccountsAllowed} linked accounts. Upgrade to Pro for unlimited accounts.`);
       setIsUpgradeModalOpen(true);
       return;
     }
     const created: BillAccount = {
       ...newAcc,
-      id: `acc-${Date.now()}`,
+      id: `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       apiSynced: false,
       lastSyncedAt: new Date().toISOString(),
       status: 'active',
@@ -958,9 +973,11 @@ export default function App() {
       ownerName: currentUser ? `${currentUser.name} (${currentUser.familyRole})` : undefined,
       ownerRole: currentUser?.familyRole,
     };
-    const nextAccounts = [...accounts, created];
+    const nextAccounts = [...accountsRef.current, created];
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds);
+    setAutoSaveStatus(`Linked ${created.name}`);
   };
 
   // Upgrade to Pro handler upon verified payment transaction
@@ -973,7 +990,7 @@ export default function App() {
         setAutoSaveStatus('Upgraded to Pro!');
       }
     } catch (err: any) {
-      alert(err.message || 'Upgrade to Pro failed');
+      setAutoSaveStatus(err.message || 'Upgrade to Pro failed');
     }
   };
 
@@ -989,8 +1006,10 @@ export default function App() {
 
   // Standing Instructions & Scheduled Payment handlers
   const handleAddStandingInstruction = (siData: Omit<StandingInstruction, 'id' | 'createdAt'>) => {
-    if (currentUser?.tier === 'free' && standingInstructions.length >= (currentUser.tierLimits?.maxStandingInstructions || 3)) {
-      setUpgradeReason(`Free Tier Limit: You have reached the maximum of ${currentUser.tierLimits?.maxStandingInstructions || 3} standing instructions. Upgrade to Pro for unlimited recurring payments.`);
+    const isPro = currentUser?.tier === 'pro';
+    const maxSiAllowed = isPro ? 999 : (currentUser?.tierLimits?.maxStandingInstructions || 6);
+    if (!isPro && standingInstructionsRef.current.length >= maxSiAllowed) {
+      setUpgradeReason(`Free Tier Limit: You have reached the maximum of ${maxSiAllowed} standing instructions. Upgrade to Pro for unlimited recurring payments.`);
       setIsUpgradeModalOpen(true);
       return;
     }
@@ -1003,6 +1022,7 @@ export default function App() {
     setStandingInstructions(nextSI);
     standingInstructionsRef.current = nextSI;
     triggerAutoSave(accounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, nextSI);
+    setAutoSaveStatus(`Added recurring: ${created.title}`);
   };
 
   const handleUpdateStandingInstruction = (updatedSI: StandingInstruction) => {
@@ -1107,12 +1127,20 @@ export default function App() {
     const nextExpenses = [newExpense, ...expensesRef.current];
 
     const nextAccounts = accounts.map((acc) => {
-      if (acc.id === si.sourceAccountId && acc.type === 'bank_account') {
-        return {
-          ...acc,
-          totalBalance: Math.max(0, Math.round((acc.totalBalance - si.amount) * 100) / 100),
-          lastSyncedAt: new Date().toISOString(),
-        };
+      if (acc.id === si.sourceAccountId) {
+        if (acc.type === 'bank_account') {
+          return {
+            ...acc,
+            totalBalance: Math.max(0, Math.round(((acc.totalBalance || 0) - si.amount) * 100) / 100),
+            lastSyncedAt: new Date().toISOString(),
+          };
+        } else {
+          return {
+            ...acc,
+            totalBalance: Math.round(((acc.totalBalance || 0) + si.amount) * 100) / 100,
+            lastSyncedAt: new Date().toISOString(),
+          };
+        }
       }
       return acc;
     });
@@ -1152,14 +1180,18 @@ export default function App() {
     const nextAccounts = accounts.filter((a) => a.id !== id);
     const nextInstallments = installments.filter((i) => i.accountId !== id);
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     setInstallments(nextInstallments);
+    installmentsRef.current = nextInstallments;
     triggerAutoSave(nextAccounts, nextInstallments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
+    setAutoSaveStatus('Account disconnected');
   };
 
   // Update existing account details
   const handleUpdateAccount = (updatedAccount: BillAccount) => {
     const nextAccounts = accounts.map((a) => (a.id === updatedAccount.id ? updatedAccount : a));
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
     setAutoSaveStatus(`Updated ${updatedAccount.name}`);
   };
@@ -1178,6 +1210,7 @@ export default function App() {
       return a;
     });
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
     setAutoSaveStatus(`Bank balance updated to ${formatCurrency(newBalance, settings.currency)}`);
   };
@@ -1201,6 +1234,7 @@ export default function App() {
       return a;
     });
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, expenses, standingInstructions, bankScheduledTransactions);
     setAutoSaveStatus(`Reconciled statement balance to ${formatCurrency(unsettledSum, settings.currency)}`);
   };
@@ -1684,7 +1718,9 @@ export default function App() {
     });
 
     setExpenses(nextExpenses);
+    expensesRef.current = nextExpenses;
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
     triggerAutoSave(nextAccounts, installments, settings, paidScheduleIds, scheduledScheduleIds, nextExpenses);
   };
 
@@ -2522,7 +2558,7 @@ export default function App() {
               onExecuteNow={handleExecuteStandingInstructionNow}
               currentUser={currentUser}
               onUpgradeToPro={() => {
-                setUpgradeReason('Free Plan Limit: Maximum of 3 standing instructions reached. Upgrade to Pro for unlimited recurring automations.');
+                setUpgradeReason('Free Plan Limit: Maximum of 6 standing instructions reached. Upgrade to Pro for unlimited recurring automations.');
                 setIsUpgradeModalOpen(true);
               }}
             />
@@ -2791,6 +2827,7 @@ export default function App() {
         accounts={accounts}
         expenses={expenses}
         currency={settings.currency || 'MYR'}
+        currentUser={currentUser}
         initialTab={universalQuickAddInitialTab}
         onAddExpense={(data, immediateSettle, installmentSplit) => {
           handleAddExpense(data, immediateSettle, installmentSplit);
@@ -2803,6 +2840,9 @@ export default function App() {
         }}
         onAddStandingInstruction={(si) => {
           handleAddStandingInstruction(si);
+        }}
+        onAddInstallment={(plan) => {
+          handleAddInstallment(plan);
         }}
         onOpenReceiptCapture={() => {
           setIsUniversalQuickAddOpen(false);

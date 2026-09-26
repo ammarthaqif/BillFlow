@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   ShieldCheck, 
   Database, 
@@ -27,7 +27,10 @@ interface AuthScreenProps {
 type AuthViewMode = 'register' | 'signin' | 'forgot_passphrase' | 'reset_database';
 
 export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
-  const [viewMode, setViewMode] = useState<AuthViewMode>('signin');
+  const registeredUsersList = useMemo(() => UserDatabaseService.getRegisteredUsers(), []);
+  const [viewMode, setViewMode] = useState<AuthViewMode>(() => {
+    return registeredUsersList.length > 0 ? 'signin' : 'register';
+  });
   
   // Registration fields
   const [name, setName] = useState('');
@@ -239,19 +242,19 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
             <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
-              <div className="text-xs font-extrabold text-indigo-400">3 Accounts</div>
+              <div className="text-xs font-extrabold text-indigo-400">6 Accounts</div>
               <div className="text-[10px] text-slate-400">Cards & Loans</div>
             </div>
             <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
-              <div className="text-xs font-extrabold text-emerald-400">3 Instructions</div>
+              <div className="text-xs font-extrabold text-emerald-400">6 Instructions</div>
               <div className="text-[10px] text-slate-400">Scheduled / Month</div>
             </div>
             <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
-              <div className="text-xs font-extrabold text-amber-400">3 AI Advice</div>
+              <div className="text-xs font-extrabold text-amber-400">5 AI Advice</div>
               <div className="text-[10px] text-slate-400">Consultations / mo</div>
             </div>
             <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
-              <div className="text-xs font-extrabold text-rose-400">5 Scans</div>
+              <div className="text-xs font-extrabold text-rose-400">10 Scans</div>
               <div className="text-[10px] text-slate-400">Receipt Extractions</div>
             </div>
           </div>
@@ -304,6 +307,35 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           {/* VIEW 1: SIGN IN */}
           {viewMode === 'signin' && (
             <form onSubmit={handleSignIn} className="space-y-4">
+              {registeredUsersList.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1.5">
+                    Saved Profiles on This Device:
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {registeredUsersList.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => {
+                          setEmail(u.email);
+                          if (u.passphrase) setPassphrase(u.passphrase);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                          email.toLowerCase() === u.email.toLowerCase()
+                            ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <User className="w-3 h-3 text-indigo-400" />
+                        <span>{u.name}</span>
+                        <span className="text-[10px] text-slate-400">({u.familyRole})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Registered Email Address

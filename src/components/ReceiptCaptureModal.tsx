@@ -136,7 +136,7 @@ export function ReceiptCaptureModal({
 
   // Quota calculation
   const isFreeTier = currentUser.tier === 'free';
-  const scansLimit = currentUser.tierLimits?.monthlyReceiptExtractions || 5;
+  const scansLimit = currentUser.tierLimits?.monthlyReceiptExtractions || 10;
   const scansUsed = currentUser.tierLimits?.receiptExtractionsUsed || 0;
   const isScanLimitReached = isFreeTier && scansUsed >= scansLimit;
 

@@ -64,15 +64,51 @@ export class UserDatabaseService {
             modified = true;
           }
 
-          if (user.tier === 'pro' && (!user.proPaymentRecord || user.proPaymentRecord.status !== 'active' || !user.proPaymentRecord.transactionId)) {
+          const isDeveloper = user.email.toLowerCase() === 'ammarthaqif.ar@gmail.com';
+          if (isDeveloper) {
+            if (user.tier !== 'pro' || !user.proPaymentRecord) {
+              user.tier = 'pro';
+              user.proPaymentRecord = {
+                transactionId: 'TXN_DEV_AMMAR_THAQIF_MASTER',
+                invoiceNumber: 'INV-DEV-AMMAR-THAQIF-001',
+                plan: 'annual',
+                amount: 249,
+                currency: 'MYR',
+                paymentMethod: 'fpx',
+                paymentMethodDetails: 'Developer Master Key',
+                paidAt: '2026-01-01T00:00:00Z',
+                nextBillingDate: '2099-12-31T23:59:59Z',
+                status: 'active',
+              };
+              user.tierLimits = {
+                maxAccounts: 999,
+                maxStandingInstructions: 999,
+                monthlyAiConsultations: 999,
+                monthlyReceiptExtractions: 999,
+                aiConsultationsUsed: 0,
+                receiptExtractionsUsed: 0,
+              };
+              modified = true;
+            }
+          } else if (user.tier === 'pro' && (!user.proPaymentRecord || user.proPaymentRecord.status !== 'active' || !user.proPaymentRecord.transactionId)) {
             console.warn(`[Security Alert] User ${user.email} had Pro tier without verified payment. Reverting to Free tier.`);
             user.tier = 'free';
             user.proPaymentRecord = undefined;
             user.tierLimits = {
-              maxAccounts: 3,
-              maxStandingInstructions: 3,
-              monthlyAiConsultations: 3,
-              monthlyReceiptExtractions: 5,
+              maxAccounts: 6,
+              maxStandingInstructions: 6,
+              monthlyAiConsultations: 5,
+              monthlyReceiptExtractions: 10,
+              aiConsultationsUsed: user.tierLimits?.aiConsultationsUsed || 0,
+              receiptExtractionsUsed: user.tierLimits?.receiptExtractionsUsed || 0,
+            };
+            modified = true;
+          } else if (user.tier === 'free' && (!user.tierLimits || (user.tierLimits.maxAccounts || 0) < 6)) {
+            user.tierLimits = {
+              maxAccounts: 6,
+              maxStandingInstructions: 6,
+              monthlyAiConsultations: 5,
+              monthlyReceiptExtractions: 10,
               aiConsultationsUsed: user.tierLimits?.aiConsultationsUsed || 0,
               receiptExtractionsUsed: user.tierLimits?.receiptExtractionsUsed || 0,
             };
@@ -650,10 +686,10 @@ export class UserDatabaseService {
     if (!user) return null;
     if (!user.tierLimits) {
       user.tierLimits = {
-        maxAccounts: 3,
-        maxStandingInstructions: 3,
-        monthlyAiConsultations: 3,
-        monthlyReceiptExtractions: 5,
+        maxAccounts: user.tier === 'pro' ? 999 : 6,
+        maxStandingInstructions: user.tier === 'pro' ? 999 : 6,
+        monthlyAiConsultations: user.tier === 'pro' ? 999 : 5,
+        monthlyReceiptExtractions: user.tier === 'pro' ? 999 : 10,
         aiConsultationsUsed: 0,
         receiptExtractionsUsed: 0,
       };
@@ -676,10 +712,10 @@ export class UserDatabaseService {
     if (!user) return null;
     if (!user.tierLimits) {
       user.tierLimits = {
-        maxAccounts: 3,
-        maxStandingInstructions: 3,
-        monthlyAiConsultations: 3,
-        monthlyReceiptExtractions: 5,
+        maxAccounts: user.tier === 'pro' ? 999 : 6,
+        maxStandingInstructions: user.tier === 'pro' ? 999 : 6,
+        monthlyAiConsultations: user.tier === 'pro' ? 999 : 5,
+        monthlyReceiptExtractions: user.tier === 'pro' ? 999 : 10,
         aiConsultationsUsed: 0,
         receiptExtractionsUsed: 0,
       };
@@ -725,10 +761,10 @@ export class UserDatabaseService {
       user.proPaymentRecord.status = 'cancelled';
     }
     user.tierLimits = {
-      maxAccounts: 3,
-      maxStandingInstructions: 3,
-      monthlyAiConsultations: 3,
-      monthlyReceiptExtractions: 5,
+      maxAccounts: 6,
+      maxStandingInstructions: 6,
+      monthlyAiConsultations: 5,
+      monthlyReceiptExtractions: 10,
       aiConsultationsUsed: user.tierLimits?.aiConsultationsUsed || 0,
       receiptExtractionsUsed: user.tierLimits?.receiptExtractionsUsed || 0,
     };
@@ -794,6 +830,7 @@ export class UserDatabaseService {
     const householdName = params.householdName?.trim() || 'My Family';
     const householdId = params.householdId || this.normalizeHouseholdId(householdName);
 
+    const isDev = params.email.trim().toLowerCase() === 'ammarthaqif.ar@gmail.com';
     const newUser: UserProfile = {
       id: userId,
       name: params.name.trim(),
@@ -804,15 +841,34 @@ export class UserDatabaseService {
       householdId,
       createdAt: new Date().toISOString(),
       databaseId,
-      tier: 'free',
-      tierLimits: {
-        maxAccounts: 3,
-        maxStandingInstructions: 3,
-        monthlyAiConsultations: 3,
-        monthlyReceiptExtractions: 5,
+      tier: isDev ? 'pro' : 'free',
+      tierLimits: isDev ? {
+        maxAccounts: 999,
+        maxStandingInstructions: 999,
+        monthlyAiConsultations: 999,
+        monthlyReceiptExtractions: 999,
+        aiConsultationsUsed: 0,
+        receiptExtractionsUsed: 0,
+      } : {
+        maxAccounts: 6,
+        maxStandingInstructions: 6,
+        monthlyAiConsultations: 5,
+        monthlyReceiptExtractions: 10,
         aiConsultationsUsed: 0,
         receiptExtractionsUsed: 0,
       },
+      proPaymentRecord: isDev ? {
+        transactionId: 'TXN_DEV_AMMAR_THAQIF_MASTER',
+        invoiceNumber: 'INV-DEV-AMMAR-THAQIF-001',
+        plan: 'annual',
+        amount: 249,
+        currency: 'MYR',
+        paymentMethod: 'fpx',
+        paymentMethodDetails: 'Developer Master Key',
+        paidAt: new Date().toISOString(),
+        nextBillingDate: '2099-12-31T23:59:59Z',
+        status: 'active',
+      } : undefined,
     };
 
     // Construct dedicated database

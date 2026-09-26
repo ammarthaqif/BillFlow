@@ -382,22 +382,22 @@ export function FamilySyncModal({
     }
   };
 
+  const [isConfirmingDisconnect, setIsConfirmingDisconnect] = useState(false);
+
   // Handle Disconnect Partner
   const handleDisconnectPartner = () => {
-    if (!window.confirm('Are you sure you want to disconnect your verified partner? This will sever data synchronization and profile switching until a new dual-party request is verified.')) {
-      return;
-    }
-
     try {
       const res = UserDatabaseService.disconnectPartner(activeUser.id);
       if (onUserUpdated) {
         onUserUpdated(res.currentUser);
       }
       refreshState();
+      setIsConfirmingDisconnect(false);
       setRectifyFeedback('Partner connection has been disconnected.');
       setTimeout(() => setRectifyFeedback(null), 4000);
     } catch (err: any) {
-      alert(err.message || 'Failed to disconnect partner.');
+      setRectifyFeedback(err.message || 'Failed to disconnect partner.');
+      setIsConfirmingDisconnect(false);
     }
   };
 
@@ -734,13 +734,32 @@ export function FamilySyncModal({
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleDisconnectPartner}
-                      className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold hover:underline cursor-pointer"
-                    >
-                      Disconnect Partner
-                    </button>
+                    {isConfirmingDisconnect ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleDisconnectPartner}
+                          className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] shadow cursor-pointer transition-colors"
+                        >
+                          Confirm Disconnect
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsConfirmingDisconnect(false)}
+                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsConfirmingDisconnect(true)}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold hover:underline cursor-pointer"
+                      >
+                        Disconnect Partner
+                      </button>
+                    )}
                   </div>
 
                   <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px]">
